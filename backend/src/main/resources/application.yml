@@ -1,0 +1,82 @@
+spring:
+  application:
+    name: hookrelay-api
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/hookrelay}
+    username: ${SPRING_DATASOURCE_USERNAME:hookrelay}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_MAX_SIZE:15}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
+      connection-timeout: 5000
+      validation-timeout: 3000
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:hookrelay}
+    password: ${SPRING_RABBITMQ_PASSWORD}
+    connection-timeout: 5s
+    publisher-confirm-type: correlated
+    publisher-returns: true
+    template:
+      mandatory: true
+  mvc:
+    problemdetails:
+      enabled: true
+  jackson:
+    default-property-inclusion: non_null
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  compression:
+    enabled: true
+  error:
+    include-message: never
+    include-binding-errors: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: hookrelay-api
+
+hookrelay:
+  outbox:
+    enabled: true
+    poll-interval: 1000
+    batch-size: 25
+    lease-seconds: 30
+    confirm-timeout-seconds: 5
+    max-publish-backoff-seconds: 60
+  events:
+    max-payload-bytes: 262144
+  http:
+    max-request-bytes: 270336
+  rabbitmq:
+    exchange: hookrelay.events
+    routing-key: events.ingested
+    queue: hookrelay.events.ingested.v1
+    dead-letter-exchange: hookrelay.events.dlx
+    dead-letter-queue: hookrelay.events.ingested.dlq
+    dead-letter-routing-key: events.ingested.dlq
+
+logging:
+  level:
+    com.hookrelay: INFO
+    org.springframework.jdbc.core: WARN

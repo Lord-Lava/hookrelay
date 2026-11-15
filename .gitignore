@@ -1,0 +1,12 @@
+.env
+.DS_Store
+.idea/
+.vscode/
+*.iml
+**/node_modules/
+**/.next/
+coverage/
+*.log
+**/.gradle/
+**/build/
+*:Zone.Identifier

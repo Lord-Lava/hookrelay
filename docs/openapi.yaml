@@ -1,0 +1,60 @@
+openapi: 3.1.0
+info:
+  title: HookRelay Ingestion API
+  version: 0.1.0
+  description: Initial project-scoped event ingestion endpoint.
+servers:
+  - url: http://localhost:8080
+paths:
+  /v1/events:
+    post:
+      summary: Accept an event for asynchronous processing
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: false
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[A-Za-z0-9._:-]+$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventType, data]
+              properties:
+                eventType:
+                  type: string
+                  maxLength: 128
+                  pattern: '^[a-z0-9]+([._-][a-z0-9]+)*$'
+                data:
+                  type: object
+      responses:
+        '202':
+          description: Event committed to PostgreSQL and transactional outbox.
+          headers:
+            Idempotent-Replayed:
+              schema: { type: boolean }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [eventId, createdAt, status]
+                properties:
+                  eventId: { type: string, format: uuid }
+                  createdAt: { type: string, format: date-time }
+                  status: { type: string, const: ACCEPTED }
+        '400': { description: Invalid JSON or request fields }
+        '401': { description: Missing or invalid project API key }
+        '409': { description: Idempotency key reused with different content }
+components:
+  securitySchemes:
+    ProjectApiKey:
+      type: apiKey
+      in: header
+      name: X-Api-Key

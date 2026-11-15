@@ -1,0 +1,4 @@
+# Local-only bootstrap key. Compose/.env supplies this value explicitly.
+hookrelay:
+  local:
+    dev-api-key: ${HOOKRELAY_DEV_API_KEY}
