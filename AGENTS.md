@@ -200,6 +200,7 @@ Use Gradle dependency verification metadata in `backend/gradle/verification-meta
 - **Never blindly trust generated verification metadata.** Review new checksums/signatures against official publisher information and inspect the diff before committing.
 - Do not accept unexpected verification metadata changes just to make CI green.
 - When dependencies/plugins change, update and review verification metadata as a separate explicit part of the change.
+- Dependency verification metadata (`gradle/verification-metadata.xml`) is generated with `--write-verification-metadata sha256`. The generated metadata must be reviewed against official publisher checksums before committing — do not blindly trust generated checksums. If verification fails on a transitive artifact, review the artifact's provenance before updating metadata.
 
 ### 4.5 Vulnerability scanning and exceptions
 
@@ -308,6 +309,7 @@ Security must be considered in design, implementation, tests, and operations—n
 - Compare secret-derived MACs using constant-time comparison APIs where applicable.
 - Enforce organization/project roles for dashboard users; API-key authentication is not a substitute for user authentication/authorization.
 - Use least privilege for database accounts, RabbitMQ users, cloud roles, and CI tokens.
+- Authentication failures must be returned as RFC 9457 `ProblemDetail` responses. Implement an `AuthenticationEntryPoint` interface in the `auth` package and an `ApiKeyAuthenticationEntryPoint` component that writes consistent `ProblemDetail` JSON for 401 responses. Filters should delegate to the entry point rather than writing error responses inline.
 
 ### 7.2 Input validation and API behavior
 
@@ -454,7 +456,7 @@ A production-oriented change is incomplete without tests that prove its behavior
 
 - **Unit tests:** deterministic business logic, retry calculations, signature canonicalization, validation, state transitions, idempotency fingerprints.
 - **Spring slice tests:** MVC/controller validation, error mapping, serialization, filters, and authentication boundaries.
-- **Integration tests:** PostgreSQL and RabbitMQ using Testcontainers or an equivalent isolated ephemeral environment. Do not use a developer's shared local services as a test dependency.
+- **Integration tests:** PostgreSQL and RabbitMQ using Testcontainers or an equivalent isolated ephemeral environment. Do not use a developer's shared local services as a test dependency. Testcontainers containers must be declared as `@Container` static fields and cleaned up via `@AfterEach` or Testcontainers lifecycle management. Do not make tests depend on wall-clock sleeps; use bounded polling or Awaitility conditions.
 - **Contract tests:** API request/response and OpenAPI alignment.
 - **Security tests:** tenant isolation, invalid/revoked keys, SSRF controls, payload limits, secret redaction, authorization failures.
 - **Failure tests:** broker unavailable, publisher timeout/negative confirm, process crash/lease expiry, database transient failure, duplicate messages, remote endpoint timeout, 429/5xx retries, permanent 4xx, malformed responses, and batch replay behavior.

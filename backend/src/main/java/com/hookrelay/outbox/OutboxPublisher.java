@@ -65,7 +65,7 @@ public class OutboxPublisher {
     }
   }
 
-  private void publish(OutboxMessage outboxMessage) {
+  void publish(OutboxMessage outboxMessage) {
     try {
       MessageProperties properties = new MessageProperties();
       properties.setContentType(MessageProperties.CONTENT_TYPE_JSON);
@@ -77,7 +77,7 @@ public class OutboxPublisher {
       CorrelationData correlationData = new CorrelationData(outboxMessage.id().toString());
       rabbitTemplate.send(exchange, routingKey, message, correlationData);
       var confirm = correlationData.getFuture().get(confirmTimeoutSeconds, TimeUnit.SECONDS);
-      if (!confirm.isAck()) {
+      if (!confirm.ack()) {
         throw new IllegalStateException("negative_publisher_confirm");
       }
       if (correlationData.getReturned() != null) {

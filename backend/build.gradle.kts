@@ -32,6 +32,9 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.testcontainers:junit-jupiter:${libs.versions.testcontainers.get()}")
+    testImplementation("org.testcontainers:postgresql:${libs.versions.testcontainers.get()}")
+    testImplementation("org.testcontainers:rabbitmq:${libs.versions.testcontainers.get()}")
 }
 
 // Reproducible dependency selection. Commit generated lock state after a trusted first resolution.

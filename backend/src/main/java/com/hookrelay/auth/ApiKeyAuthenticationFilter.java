@@ -5,21 +5,19 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.Map;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
+
   private final ApiKeyAuthService apiKeyAuthService;
-  private final ObjectMapper objectMapper;
+  private final AuthenticationEntryPoint authenticationEntryPoint;
 
   public ApiKeyAuthenticationFilter(
-      ApiKeyAuthService apiKeyAuthService, ObjectMapper objectMapper) {
+      ApiKeyAuthService apiKeyAuthService, AuthenticationEntryPoint authenticationEntryPoint) {
     this.apiKeyAuthService = apiKeyAuthService;
-    this.objectMapper = objectMapper;
+    this.authenticationEntryPoint = authenticationEntryPoint;
   }
 
   @Override
@@ -34,15 +32,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
     String rawKey = request.getHeader("X-Api-Key");
     var identity = apiKeyAuthService.authenticate(rawKey);
     if (identity.isEmpty()) {
-      response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-      response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-      objectMapper.writeValue(
-          response.getOutputStream(),
-          Map.of(
-              "type", "about:blank",
-              "title", "Unauthorized",
-              "status", 401,
-              "detail", "A valid X-Api-Key header is required."));
+      authenticationEntryPoint.commence(request, response);
       return;
     }
 

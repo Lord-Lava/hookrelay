@@ -28,6 +28,7 @@
 |---|---:|---|
 | Spotless Gradle plugin | 8.11.0 | Enforce Java formatting in `check`. |
 | google-java-format | 2.0.0 | Deterministic Java formatter. Upgraded from 1.37.0 because it is incompatible with the Java 25 toolchain. |
+| Testcontainers | 1.20.6 | Integration test containers for PostgreSQL and RabbitMQ. Testcontainers 1.20.6 resolves to testcontainers-bom 2.0.5. |
 | OWASP Dependency-Check Gradle plugin | 13.0.0 | SCA scan; fail on CVSS >= 7.0 in the configured audit task. |
 | CycloneDX Gradle plugin | 3.5.1 | Generate a resolved dependency SBOM. |
 
