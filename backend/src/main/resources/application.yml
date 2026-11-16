@@ -59,6 +59,8 @@ management:
 hookrelay:
   outbox:
     enabled: true
+    # Scheduled publisher polling. Disable only in tests that invoke the publisher directly.
+    scheduling-enabled: true
     poll-interval: 1000
     batch-size: 25
     lease-seconds: 30

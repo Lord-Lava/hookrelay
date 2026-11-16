@@ -43,6 +43,8 @@ class EventIngestionIntegrationTest {
 
   @DynamicPropertySource
   static void configureProperties(DynamicPropertyRegistry registry) {
+    // Unique marker ensures this test class gets its own cached application context
+    registry.add("test.context.marker", () -> "event-ingestion-integration");
     registry.add("spring.datasource.url", postgres::getJdbcUrl);
     registry.add("spring.datasource.username", postgres::getUsername);
     registry.add("spring.datasource.password", postgres::getPassword);

@@ -1,5 +1,8 @@
 package com.hookrelay.common;
 
+import com.hookrelay.auth.AuthenticationRequiredException;
+import com.hookrelay.endpoint.application.EndpointAlreadyExistsException;
+import com.hookrelay.endpoint.application.EndpointNotFoundException;
 import com.hookrelay.event.application.IdempotencyConflictException;
 import java.net.URI;
 import java.time.Instant;
@@ -38,6 +41,26 @@ public class ApiExceptionHandler {
       IdempotencyConflictException exception) {
     return ResponseEntity.status(HttpStatus.CONFLICT)
         .body(problem(HttpStatus.CONFLICT, exception.getMessage()));
+  }
+
+  @ExceptionHandler(EndpointNotFoundException.class)
+  public ResponseEntity<ProblemDetail> handleEndpointNotFound(EndpointNotFoundException exception) {
+    return ResponseEntity.status(HttpStatus.NOT_FOUND)
+        .body(problem(HttpStatus.NOT_FOUND, exception.getMessage()));
+  }
+
+  @ExceptionHandler(EndpointAlreadyExistsException.class)
+  public ResponseEntity<ProblemDetail> handleEndpointAlreadyExists(
+      EndpointAlreadyExistsException exception) {
+    return ResponseEntity.status(HttpStatus.CONFLICT)
+        .body(problem(HttpStatus.CONFLICT, exception.getMessage()));
+  }
+
+  @ExceptionHandler(AuthenticationRequiredException.class)
+  public ResponseEntity<ProblemDetail> handleAuthenticationRequired(
+      AuthenticationRequiredException exception) {
+    return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+        .body(problem(HttpStatus.UNAUTHORIZED, exception.getMessage()));
   }
 
   @ExceptionHandler(IllegalArgumentException.class)

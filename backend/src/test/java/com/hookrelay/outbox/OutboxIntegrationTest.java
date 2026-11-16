@@ -36,6 +36,8 @@ class OutboxIntegrationTest {
 
   @DynamicPropertySource
   static void configureProperties(DynamicPropertyRegistry registry) {
+    // Unique marker ensures this test class gets its own cached application context
+    registry.add("test.context.marker", () -> "outbox-integration");
     registry.add("spring.datasource.url", postgres::getJdbcUrl);
     registry.add("spring.datasource.username", postgres::getUsername);
     registry.add("spring.datasource.password", postgres::getPassword);
@@ -47,6 +49,8 @@ class OutboxIntegrationTest {
     registry.add("spring.rabbitmq.publisher-returns", () -> "true");
     registry.add("spring.rabbitmq.template.mandatory", () -> "true");
     registry.add("hookrelay.outbox.enabled", () -> "true");
+    // Disable scheduled execution; tests invoke publishPendingMessages() deterministically
+    registry.add("hookrelay.outbox.scheduling-enabled", () -> "false");
     registry.add("hookrelay.outbox.poll-interval", () -> "3600000");
     registry.add("hookrelay.outbox.confirm-timeout-seconds", () -> "30");
   }
@@ -90,6 +94,12 @@ class OutboxIntegrationTest {
     jdbcTemplate.update("DELETE FROM api_keys");
     jdbcTemplate.update("DELETE FROM projects");
     jdbcTemplate.update("DELETE FROM organizations");
+
+    // Purge RabbitMQ queues so messages don't leak between tests
+    rabbitTemplate.execute(channel -> {
+      channel.queuePurge("hookrelay.events.ingested.v1");
+      return null;
+    });
   }
 
   private UUID insertOutboxMessage(UUID aggregateId, String payload) {

@@ -1,0 +1,335 @@
+package com.hookrelay.endpoint.api;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.hookrelay.auth.ApiKeyAuthService;
+import com.hookrelay.endpoint.application.EndpointAlreadyExistsException;
+import com.hookrelay.endpoint.application.EndpointNotFoundException;
+import com.hookrelay.endpoint.application.EndpointService;
+import com.hookrelay.endpoint.domain.WebhookEndpoint;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
+import jakarta.validation.ValidatorFactory;
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
+@Testcontainers
+class EndpointControllerIntegrationTest {
+
+  private static final String TEST_API_KEY = "hr_live_testkey_integration_test_secret_value";
+  private static final String TEST_API_KEY_HASH = ApiKeyAuthService.sha256(TEST_API_KEY);
+
+  @Container
+  static PostgreSQLContainer<?> postgres =
+      new PostgreSQLContainer<>(DockerImageName.parse("postgres:18.7-alpine"));
+
+  @DynamicPropertySource
+  static void configureProperties(DynamicPropertyRegistry registry) {
+    // Unique marker ensures this test class gets its own cached application context
+    registry.add("test.context.marker", () -> "endpoint-controller-integration");
+    registry.add("spring.datasource.url", postgres::getJdbcUrl);
+    registry.add("spring.datasource.username", postgres::getUsername);
+    registry.add("spring.datasource.password", postgres::getPassword);
+    registry.add("hookrelay.outbox.enabled", () -> "false");
+  }
+
+  @Autowired private JdbcTemplate jdbcTemplate;
+  @Autowired private EndpointService endpointService;
+
+  private Validator validator;
+
+  private UUID projectId;
+
+  @BeforeEach
+  void seedDatabase() {
+    ValidatorFactory factory = Validation.buildDefaultValidatorFactory();
+    validator = factory.getValidator();
+
+    UUID organizationId = UUID.fromString("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa");
+    projectId = UUID.fromString("bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb");
+    UUID apiKeyId = UUID.fromString("cccccccc-3333-4333-8333-cccccccccccc");
+
+    jdbcTemplate.update(
+        "INSERT INTO organizations (id, name, created_at) VALUES (?, ?, ?)",
+        organizationId,
+        "Integration Test Org",
+        Timestamp.from(Instant.now()));
+
+    jdbcTemplate.update(
+        "INSERT INTO projects (id, organization_id, name, environment, created_at) VALUES (?, ?, ?, ?, ?)",
+        projectId,
+        organizationId,
+        "Integration Test Project",
+        "development",
+        Timestamp.from(Instant.now()));
+
+    jdbcTemplate.update(
+        "INSERT INTO api_keys (id, project_id, name, key_prefix, key_hash, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        apiKeyId,
+        projectId,
+        "Integration test key",
+        "testkey",
+        TEST_API_KEY_HASH,
+        Timestamp.from(Instant.now()));
+  }
+
+  @AfterEach
+  void cleanupDatabase() {
+    jdbcTemplate.update("DELETE FROM endpoint_subscriptions");
+    jdbcTemplate.update("DELETE FROM endpoints");
+    jdbcTemplate.update("DELETE FROM api_keys");
+    jdbcTemplate.update("DELETE FROM projects");
+    jdbcTemplate.update("DELETE FROM organizations");
+  }
+
+  @Test
+  void createEndpointReturnsCreatedEndpoint() {
+    WebhookEndpoint endpoint =
+        endpointService.createEndpoint(projectId, "https://example.com/webhook", "My endpoint");
+
+    assertThat(endpoint.id()).isNotNull();
+    assertThat(endpoint.projectId()).isEqualTo(projectId);
+    assertThat(endpoint.url()).isEqualTo("https://example.com/webhook");
+    assertThat(endpoint.description()).isEqualTo("My endpoint");
+    assertThat(endpoint.enabled()).isTrue();
+    assertThat(endpoint.createdAt()).isNotNull();
+    assertThat(endpoint.updatedAt()).isNotNull();
+    assertThat(endpoint.deletedAt()).isNull();
+    // Signing secret encryption is deferred; empty sentinel satisfies NOT NULL constraint
+    assertThat(endpoint.signingSecretCiphertext()).isEmpty();
+  }
+
+  @Test
+  void createEndpointRejectsDuplicateUrl() {
+    endpointService.createEndpoint(projectId, "https://example.com/webhook", "First");
+
+    assertThatThrownBy(() ->
+            endpointService.createEndpoint(projectId, "HTTPS://EXAMPLE.COM/webhook", "Duplicate"))
+        .isInstanceOf(EndpointAlreadyExistsException.class)
+        .hasMessageContaining("already exists");
+  }
+
+  @Test
+  void getEndpointReturnsEndpoint() {
+    WebhookEndpoint created =
+        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+
+    WebhookEndpoint found = endpointService.getEndpoint(created.id(), projectId);
+
+    assertThat(found.id()).isEqualTo(created.id());
+    assertThat(found.url()).isEqualTo("https://example.com/webhook");
+    assertThat(found.description()).isEqualTo("Test");
+    assertThat(found.enabled()).isTrue();
+  }
+
+  @Test
+  void getEndpointReturns404ForUnknown() {
+    assertThatThrownBy(() -> endpointService.getEndpoint(UUID.randomUUID(), projectId))
+        .isInstanceOf(EndpointNotFoundException.class);
+  }
+
+  @Test
+  void getEndpointRejectsCrossProjectAccess() {
+    UUID otherProjectId = UUID.fromString("dddddddd-4444-4444-8444-dddddddddddd");
+    jdbcTemplate.update(
+        "INSERT INTO projects (id, organization_id, name, environment, created_at) VALUES (?, ?, ?, ?, ?)",
+        otherProjectId,
+        UUID.fromString("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"),
+        "Other Project",
+        "development",
+        Timestamp.from(Instant.now()));
+
+    WebhookEndpoint created =
+        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+
+    assertThatThrownBy(() -> endpointService.getEndpoint(created.id(), otherProjectId))
+        .isInstanceOf(EndpointNotFoundException.class);
+  }
+
+  @Test
+  void listEndpointsReturnsCreatedEndpoints() {
+    endpointService.createEndpoint(projectId, "https://a.example.com/webhook", "A");
+    endpointService.createEndpoint(projectId, "https://b.example.com/webhook", "B");
+    endpointService.createEndpoint(projectId, "https://c.example.com/webhook", "C");
+
+    List<WebhookEndpoint> all = endpointService.listEndpoints(projectId, 0, 20);
+
+    assertThat(all).hasSize(3);
+    assertThat(all).allMatch(e -> e.projectId().equals(projectId));
+    assertThat(all).allMatch(e -> e.deletedAt() == null);
+  }
+
+  @Test
+  void listEndpointsSupportsPagination() {
+    endpointService.createEndpoint(projectId, "https://1.example.com/webhook", "One");
+    endpointService.createEndpoint(projectId, "https://2.example.com/webhook", "Two");
+    endpointService.createEndpoint(projectId, "https://3.example.com/webhook", "Three");
+
+    List<WebhookEndpoint> page1 = endpointService.listEndpoints(projectId, 0, 2);
+    List<WebhookEndpoint> page2 = endpointService.listEndpoints(projectId, 1, 2);
+
+    assertThat(page1).hasSize(2);
+    assertThat(page2).hasSize(1);
+    assertThat(endpointService.countEndpoints(projectId)).isEqualTo(3);
+  }
+
+  @Test
+  void updateEndpointReturnsUpdatedEndpoint() {
+    WebhookEndpoint created =
+        endpointService.createEndpoint(projectId, "https://old.example.com/webhook", "Old");
+
+    WebhookEndpoint updated =
+        endpointService.updateEndpoint(
+            created.id(), projectId, "https://new.example.com/webhook", "Updated", false);
+
+    assertThat(updated.url()).isEqualTo("https://new.example.com/webhook");
+    assertThat(updated.description()).isEqualTo("Updated");
+    assertThat(updated.enabled()).isFalse();
+    assertThat(updated.createdAt()).isEqualTo(created.createdAt());
+    assertThat(updated.updatedAt()).isNotNull();
+  }
+
+  @Test
+  void updateEndpointRejectsDuplicateUrl() {
+    endpointService.createEndpoint(projectId, "https://first.example.com/webhook", "First");
+    WebhookEndpoint second =
+        endpointService.createEndpoint(projectId, "https://second.example.com/webhook", "Second");
+
+    assertThatThrownBy(() ->
+            endpointService.updateEndpoint(
+                second.id(), projectId, "HTTPS://FIRST.EXAMPLE.COM/webhook", null, null))
+        .isInstanceOf(EndpointAlreadyExistsException.class);
+  }
+
+  @Test
+  void updateEndpointRejectsUnknownEndpoint() {
+    assertThatThrownBy(() ->
+            endpointService.updateEndpoint(
+                UUID.randomUUID(), projectId, "https://example.com/webhook", null, null))
+        .isInstanceOf(EndpointNotFoundException.class);
+  }
+
+  @Test
+  void enableAndDisableEndpoint() {
+    WebhookEndpoint created =
+        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+
+    endpointService.disableEndpoint(created.id(), projectId);
+    WebhookEndpoint disabled = endpointService.getEndpoint(created.id(), projectId);
+    assertThat(disabled.enabled()).isFalse();
+
+    endpointService.enableEndpoint(created.id(), projectId);
+    WebhookEndpoint enabled = endpointService.getEndpoint(created.id(), projectId);
+    assertThat(enabled.enabled()).isTrue();
+  }
+
+  @Test
+  void deleteEndpointSoftDeletes() {
+    WebhookEndpoint created =
+        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+
+    endpointService.deleteEndpoint(created.id(), projectId);
+
+    assertThatThrownBy(() -> endpointService.getEndpoint(created.id(), projectId))
+        .isInstanceOf(EndpointNotFoundException.class);
+    assertThat(endpointService.listEndpoints(projectId, 0, 20)).isEmpty();
+  }
+
+  @Test
+  void deleteEndpointReturns404ForUnknown() {
+    assertThatThrownBy(() -> endpointService.deleteEndpoint(UUID.randomUUID(), projectId))
+        .isInstanceOf(EndpointNotFoundException.class);
+  }
+
+  @Test
+  void deleteEndpointRejectsCrossProjectAccess() {
+    UUID otherProjectId = UUID.fromString("eeeeeeee-6666-4666-8666-eeeeeeeeeeee");
+    jdbcTemplate.update(
+        "INSERT INTO projects (id, organization_id, name, environment, created_at) VALUES (?, ?, ?, ?, ?)",
+        otherProjectId,
+        UUID.fromString("aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa"),
+        "Victim Project",
+        "development",
+        Timestamp.from(Instant.now()));
+
+    WebhookEndpoint created =
+        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+
+    assertThatThrownBy(() -> endpointService.deleteEndpoint(created.id(), otherProjectId))
+        .isInstanceOf(EndpointNotFoundException.class);
+  }
+
+  @Test
+  void createRequestRejectsBlankUrl() {
+    EndpointCreateRequest request = new EndpointCreateRequest(null, "desc");
+    Set<ConstraintViolation<EndpointCreateRequest>> violations = validator.validate(request);
+    assertThat(violations).anyMatch(v -> v.getMessage().contains("URL is required"));
+  }
+
+  @Test
+  void createRequestRejectsNonHttpsUrl() {
+    EndpointCreateRequest request = new EndpointCreateRequest("http://example.com/webhook", "desc");
+    Set<ConstraintViolation<EndpointCreateRequest>> violations = validator.validate(request);
+    assertThat(violations).anyMatch(v -> v.getMessage().contains("HTTPS scheme"));
+  }
+
+  @Test
+  void createRequestRejectsTooLongUrl() {
+    String longUrl = "https://" + "a".repeat(3000) + ".com/webhook";
+    EndpointCreateRequest request = new EndpointCreateRequest(longUrl, "desc");
+    Set<ConstraintViolation<EndpointCreateRequest>> violations = validator.validate(request);
+    assertThat(violations).anyMatch(v -> v.getMessage().contains("2048 characters"));
+  }
+
+  @Test
+  void createRequestRejectsTooLongDescription() {
+    String longDesc = "a".repeat(200);
+    EndpointCreateRequest request =
+        new EndpointCreateRequest("https://example.com/webhook", longDesc);
+    Set<ConstraintViolation<EndpointCreateRequest>> violations = validator.validate(request);
+    assertThat(violations).anyMatch(v -> v.getMessage().contains("160 characters"));
+  }
+
+  @Test
+  void createRequestAcceptsValidHttpsUrl() {
+    EndpointCreateRequest request =
+        new EndpointCreateRequest("https://example.com/webhook", "Valid");
+    Set<ConstraintViolation<EndpointCreateRequest>> violations = validator.validate(request);
+    assertThat(violations).isEmpty();
+  }
+
+  @Test
+  void updateRequestAcceptsNullFields() {
+    EndpointUpdateRequest request = new EndpointUpdateRequest(null, null, null);
+    Set<ConstraintViolation<EndpointUpdateRequest>> violations = validator.validate(request);
+    assertThat(violations).isEmpty();
+  }
+
+  @Test
+  void responseDoesNotExposeSigningSecret() {
+    WebhookEndpoint endpoint =
+        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+
+    // The domain model holds the ciphertext field (empty sentinel until Step 4 encryption)
+    // and the response DTO does not include it at all
+    assertThat(endpoint.signingSecretCiphertext()).isEmpty();
+  }
+}

@@ -37,6 +37,28 @@ public class WebhookEndpointRepository {
         projectId);
   }
 
+  public List<WebhookEndpoint> findByProjectPaginated(UUID projectId, int offset, int limit) {
+    return jdbcTemplate.query(
+        """
+        SELECT id, project_id, url, description, signing_secret_ciphertext, enabled,
+               created_at, updated_at, deleted_at
+        FROM endpoints
+        WHERE project_id = ? AND deleted_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        rs -> {
+          List<WebhookEndpoint> endpoints = new ArrayList<>();
+          while (rs.next()) {
+            endpoints.add(mapRow(rs));
+          }
+          return endpoints;
+        },
+        projectId,
+        limit,
+        offset);
+  }
+
   public List<WebhookEndpoint> findByProject(UUID projectId) {
     return jdbcTemplate.query(
         """
@@ -53,6 +75,13 @@ public class WebhookEndpointRepository {
           }
           return endpoints;
         },
+        projectId);
+  }
+
+  public int countByProject(UUID projectId) {
+    return jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM endpoints WHERE project_id = ? AND deleted_at IS NULL",
+        (rs, rowNum) -> rs.getInt(1),
         projectId);
   }
 
@@ -98,7 +127,10 @@ public class WebhookEndpointRepository {
       throw new IllegalStateException(
           "Endpoint was not found or was already soft-deleted: " + endpoint.id());
     }
-    return endpoint;
+    // Re-read to pick up database-generated updated_at timestamp
+    return findByIdAndProject(endpoint.id(), endpoint.projectId())
+        .orElseThrow(
+            () -> new IllegalStateException("Endpoint disappeared after update: " + endpoint.id()));
   }
 
   public int softDelete(UUID id, UUID projectId) {

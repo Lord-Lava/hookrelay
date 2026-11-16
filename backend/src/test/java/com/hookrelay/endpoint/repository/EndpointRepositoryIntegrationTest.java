@@ -38,6 +38,8 @@ class EndpointRepositoryIntegrationTest {
 
   @DynamicPropertySource
   static void configureProperties(DynamicPropertyRegistry registry) {
+    // Unique marker ensures this test class gets its own cached application context
+    registry.add("test.context.marker", () -> "endpoint-repository-integration");
     registry.add("spring.datasource.url", postgres::getJdbcUrl);
     registry.add("spring.datasource.username", postgres::getUsername);
     registry.add("spring.datasource.password", postgres::getPassword);
@@ -218,19 +220,23 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void saveUpdatesExistingEndpoint() {
-    WebhookEndpoint existing =
+    WebhookEndpoint inserted =
         insertEndpoint(PROJECT_ID_A, "https://old.example.com/webhook", true);
+
+    // Fetch the actual persisted state (DB-generated timestamps)
+    WebhookEndpoint beforeUpdate =
+        endpointRepository.findByIdAndProject(inserted.id(), PROJECT_ID_A).orElseThrow();
 
     WebhookEndpoint updated =
         new WebhookEndpoint(
-            existing.id(),
-            existing.projectId(),
+            beforeUpdate.id(),
+            beforeUpdate.projectId(),
             "https://new.example.com/webhook",
             "Updated description",
-            existing.signingSecretCiphertext(),
+            beforeUpdate.signingSecretCiphertext(),
             false,
-            existing.createdAt(),
-            existing.updatedAt(),
+            beforeUpdate.createdAt(),
+            beforeUpdate.updatedAt(),
             null);
 
     WebhookEndpoint result = endpointRepository.save(updated);
@@ -238,9 +244,9 @@ class EndpointRepositoryIntegrationTest {
     assertThat(result.url()).isEqualTo("https://new.example.com/webhook");
     assertThat(result.description()).isEqualTo("Updated description");
     assertThat(result.enabled()).isFalse();
-    assertThat(result.createdAt()).isEqualTo(existing.createdAt());
+    assertThat(result.createdAt()).isEqualTo(beforeUpdate.createdAt());
 
-    var found = endpointRepository.findByIdAndProject(existing.id(), PROJECT_ID_A);
+    var found = endpointRepository.findByIdAndProject(inserted.id(), PROJECT_ID_A);
     assertThat(found).isPresent();
     assertThat(found.get().url()).isEqualTo("https://new.example.com/webhook");
     assertThat(found.get().enabled()).isFalse();

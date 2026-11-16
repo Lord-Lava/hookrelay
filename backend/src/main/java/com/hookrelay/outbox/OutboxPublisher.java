@@ -34,6 +34,7 @@ public class OutboxPublisher {
   private final int leaseSeconds;
   private final int confirmTimeoutSeconds;
   private final int maxBackoffSeconds;
+  private final boolean schedulingEnabled;
 
   public OutboxPublisher(
       OutboxStore outboxStore,
@@ -43,7 +44,8 @@ public class OutboxPublisher {
       @Value("${hookrelay.outbox.batch-size:25}") int batchSize,
       @Value("${hookrelay.outbox.lease-seconds:30}") int leaseSeconds,
       @Value("${hookrelay.outbox.confirm-timeout-seconds:5}") int confirmTimeoutSeconds,
-      @Value("${hookrelay.outbox.max-publish-backoff-seconds:60}") int maxBackoffSeconds) {
+      @Value("${hookrelay.outbox.max-publish-backoff-seconds:60}") int maxBackoffSeconds,
+      @Value("${hookrelay.outbox.scheduling-enabled:true}") boolean schedulingEnabled) {
     this.outboxStore = outboxStore;
     this.rabbitTemplate = rabbitTemplate;
     this.exchange = exchange;
@@ -52,9 +54,22 @@ public class OutboxPublisher {
     this.leaseSeconds = leaseSeconds;
     this.confirmTimeoutSeconds = confirmTimeoutSeconds;
     this.maxBackoffSeconds = maxBackoffSeconds;
+    this.schedulingEnabled = schedulingEnabled;
   }
 
+  /**
+   * Scheduled entry point. Gated by {@code hookrelay.outbox.scheduling-enabled} so integration
+   * tests can disable automatic execution while invoking {@link #publishPendingMessages()}
+   * deterministically.
+   */
   @Scheduled(fixedDelayString = "${hookrelay.outbox.poll-interval:1000}")
+  public void scheduledPublish() {
+    if (!schedulingEnabled) {
+      return;
+    }
+    publishPendingMessages();
+  }
+
   public void publishPendingMessages() {
     for (int index = 0; index < batchSize; index++) {
       var claimed = outboxStore.claimNext(lockOwner, leaseSeconds);

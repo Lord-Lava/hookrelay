@@ -12,7 +12,7 @@ public final class TenantContext {
   public static ProjectIdentity require() {
     ProjectIdentity identity = CURRENT.get();
     if (identity == null) {
-      throw new IllegalStateException("Tenant context is not available for this request");
+      throw new AuthenticationRequiredException("Tenant context is not available for this request");
     }
     return identity;
   }
