@@ -2304,6 +2304,143 @@
           ]
         },
         {
+          "name": "PUT /v1/endpoints/{endpointId}/rotate-secret - Rotate signing secret successfully",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/rotate-secret",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}",
+                "rotate-secret"
+              ]
+            },
+            "description": "Rotates the signing secret for an endpoint. Expects 200 OK with new plaintext secret."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Response has signingSecret with whsec_ prefix\", function () {",
+                  "    pm.expect(json).to.have.property(\"signingSecret\");",
+                  "    pm.expect(json.signingSecret).to.match(/^whsec_/);",
+                  "    pm.environment.set(\"rotatedSigningSecret\", json.signingSecret);",
+                  "});",
+                  "",
+                  "pm.test(\"Response does not expose signingSecretCiphertext\", function () {",
+                  "    pm.expect(json).to.not.have.property(\"signingSecretCiphertext\");",
+                  "});",
+                  "",
+                  "pm.test(\"Response has updatedAt\", function () {",
+                  "    pm.expect(json).to.have.property(\"updatedAt\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /v1/endpoints/{endpointId}/rotate-secret - Unknown endpoint rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000/rotate-secret",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "00000000-0000-0000-0000-000000000000",
+                "rotate-secret"
+              ]
+            },
+            "description": "Rotates a secret on a nonexistent endpoint. Expects 404 Not Found."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(404);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /v1/endpoints/{endpointId}/rotate-secret - Missing authentication",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/rotate-secret",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}",
+                "rotate-secret"
+              ]
+            },
+            "description": "Rotates a secret without the X-Api-Key header. Expects 401 Unauthorized."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Teardown: Delete dedicated endpoint",
           "request": {
             "method": "DELETE",

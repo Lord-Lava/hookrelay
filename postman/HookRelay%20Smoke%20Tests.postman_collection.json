@@ -923,6 +923,56 @@
           ]
         },
         {
+          "name": "Smoke: Rotate signing secret",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}/rotate-secret",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}",
+                "rotate-secret"
+              ]
+            },
+            "description": "Rotates the signing secret on the smoke test endpoint. Expects 200 OK."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Response has signingSecret with whsec_ prefix\", function () {",
+                  "    pm.expect(json).to.have.property(\"signingSecret\");",
+                  "    pm.expect(json.signingSecret).to.match(/^whsec_/);",
+                  "    pm.collectionVariables.set(\"smokeRotatedSecret\", json.signingSecret);",
+                  "});",
+                  "",
+                  "pm.test(\"Response does not expose signingSecretCiphertext\", function () {",
+                  "    pm.expect(json).to.not.have.property(\"signingSecretCiphertext\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Smoke: Invalid event type rejected",
           "request": {
             "method": "PUT",
