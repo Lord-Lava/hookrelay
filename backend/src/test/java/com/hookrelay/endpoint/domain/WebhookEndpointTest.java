@@ -21,6 +21,8 @@ class WebhookEndpointTest {
             "https://example.com/webhook",
             "My endpoint",
             "ciphertext",
+            new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+            "v1",
             true,
             now,
             now,
@@ -48,6 +50,8 @@ class WebhookEndpointTest {
             "https://example.com/webhook",
             null,
             null,
+            new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+            "v1",
             false,
             Instant.now(),
             Instant.now(),
@@ -64,13 +68,34 @@ class WebhookEndpointTest {
     UUID projectId = UUID.randomUUID();
     Instant now = Instant.now();
     Instant deletedAt = null;
+    byte[] nonce = new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
 
     WebhookEndpoint a =
         new WebhookEndpoint(
-            id, projectId, "https://example.com/webhook", null, null, true, now, now, deletedAt);
+            id,
+            projectId,
+            "https://example.com/webhook",
+            null,
+            null,
+            nonce,
+            "v1",
+            true,
+            now,
+            now,
+            deletedAt);
     WebhookEndpoint b =
         new WebhookEndpoint(
-            id, projectId, "https://example.com/webhook", null, null, true, now, now, deletedAt);
+            id,
+            projectId,
+            "https://example.com/webhook",
+            null,
+            null,
+            nonce,
+            "v1",
+            true,
+            now,
+            now,
+            deletedAt);
 
     assertThat(a).isEqualTo(b);
     assertThat(a.hashCode()).isEqualTo(b.hashCode());
@@ -85,6 +110,8 @@ class WebhookEndpointTest {
             "https://example.com/webhook",
             null,
             null,
+            new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+            "v1",
             true,
             Instant.now(),
             Instant.now(),
@@ -96,6 +123,8 @@ class WebhookEndpointTest {
             "https://example.com/webhook",
             null,
             null,
+            new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+            "v1",
             true,
             Instant.now(),
             Instant.now(),

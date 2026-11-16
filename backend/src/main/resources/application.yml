@@ -77,6 +77,11 @@ hookrelay:
     dead-letter-exchange: hookrelay.events.dlx
     dead-letter-queue: hookrelay.events.ingested.dlq
     dead-letter-routing-key: events.ingested.dlq
+  signing:
+    # Base64-encoded 256-bit AES-256-GCM encryption key. Must be provided via external
+    # configuration (e.g. SIGNING_ENCRYPTION_KEY env var). No default or hardcoded key.
+    encryption-key: ${SIGNING_ENCRYPTION_KEY:}
+    key-version: ${SIGNING_KEY_VERSION:v1}
 
 logging:
   level:

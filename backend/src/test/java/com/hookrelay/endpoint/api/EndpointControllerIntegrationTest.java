@@ -49,6 +49,9 @@ class EndpointControllerIntegrationTest {
     registry.add("spring.datasource.username", postgres::getUsername);
     registry.add("spring.datasource.password", postgres::getPassword);
     registry.add("hookrelay.outbox.enabled", () -> "false");
+    registry.add(
+        "hookrelay.signing.encryption-key", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+    registry.add("hookrelay.signing.key-version", () -> "v1");
   }
 
   @Autowired private JdbcTemplate jdbcTemplate;
@@ -102,8 +105,9 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void createEndpointReturnsCreatedEndpoint() {
-    WebhookEndpoint endpoint =
+    EndpointService.CreatedEndpointResult result =
         endpointService.createEndpoint(projectId, "https://example.com/webhook", "My endpoint");
+    WebhookEndpoint endpoint = result.endpoint();
 
     assertThat(endpoint.id()).isNotNull();
     assertThat(endpoint.projectId()).isEqualTo(projectId);
@@ -113,8 +117,12 @@ class EndpointControllerIntegrationTest {
     assertThat(endpoint.createdAt()).isNotNull();
     assertThat(endpoint.updatedAt()).isNotNull();
     assertThat(endpoint.deletedAt()).isNull();
-    // Signing secret encryption is deferred; empty sentinel satisfies NOT NULL constraint
-    assertThat(endpoint.signingSecretCiphertext()).isEmpty();
+    // Signing secret encryption is configured in test environment; ciphertext is non-empty
+    assertThat(endpoint.signingSecretCiphertext()).isNotEmpty();
+    assertThat(endpoint.nonce()).isNotNull();
+    assertThat(endpoint.keyVersion()).isEqualTo("v1");
+    // Plaintext secret is returned separately, not embedded in the endpoint domain model
+    assertThat(result.signingSecret()).startsWith("whsec_");
   }
 
   @Test
@@ -129,8 +137,9 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void getEndpointReturnsEndpoint() {
-    WebhookEndpoint created =
+    EndpointService.CreatedEndpointResult createdResult =
         endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+    WebhookEndpoint created = createdResult.endpoint();
 
     WebhookEndpoint found = endpointService.getEndpoint(created.id(), projectId);
 
@@ -157,8 +166,9 @@ class EndpointControllerIntegrationTest {
         "development",
         Timestamp.from(Instant.now()));
 
-    WebhookEndpoint created =
+    EndpointService.CreatedEndpointResult createdResult =
         endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+    WebhookEndpoint created = createdResult.endpoint();
 
     assertThatThrownBy(() -> endpointService.getEndpoint(created.id(), otherProjectId))
         .isInstanceOf(EndpointNotFoundException.class);
@@ -193,8 +203,9 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void updateEndpointReturnsUpdatedEndpoint() {
-    WebhookEndpoint created =
+    EndpointService.CreatedEndpointResult createdResult =
         endpointService.createEndpoint(projectId, "https://old.example.com/webhook", "Old");
+    WebhookEndpoint created = createdResult.endpoint();
 
     WebhookEndpoint updated =
         endpointService.updateEndpoint(
@@ -210,8 +221,9 @@ class EndpointControllerIntegrationTest {
   @Test
   void updateEndpointRejectsDuplicateUrl() {
     endpointService.createEndpoint(projectId, "https://first.example.com/webhook", "First");
-    WebhookEndpoint second =
+    EndpointService.CreatedEndpointResult secondResult =
         endpointService.createEndpoint(projectId, "https://second.example.com/webhook", "Second");
+    WebhookEndpoint second = secondResult.endpoint();
 
     assertThatThrownBy(() ->
             endpointService.updateEndpoint(
@@ -229,8 +241,9 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void enableAndDisableEndpoint() {
-    WebhookEndpoint created =
+    EndpointService.CreatedEndpointResult createdResult =
         endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+    WebhookEndpoint created = createdResult.endpoint();
 
     endpointService.disableEndpoint(created.id(), projectId);
     WebhookEndpoint disabled = endpointService.getEndpoint(created.id(), projectId);
@@ -243,8 +256,9 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void deleteEndpointSoftDeletes() {
-    WebhookEndpoint created =
+    EndpointService.CreatedEndpointResult createdResult =
         endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+    WebhookEndpoint created = createdResult.endpoint();
 
     endpointService.deleteEndpoint(created.id(), projectId);
 
@@ -270,8 +284,9 @@ class EndpointControllerIntegrationTest {
         "development",
         Timestamp.from(Instant.now()));
 
-    WebhookEndpoint created =
+    EndpointService.CreatedEndpointResult createdResult =
         endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+    WebhookEndpoint created = createdResult.endpoint();
 
     assertThatThrownBy(() -> endpointService.deleteEndpoint(created.id(), otherProjectId))
         .isInstanceOf(EndpointNotFoundException.class);
@@ -325,11 +340,13 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void responseDoesNotExposeSigningSecret() {
-    WebhookEndpoint endpoint =
+    EndpointService.CreatedEndpointResult result =
         endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
 
-    // The domain model holds the ciphertext field (empty sentinel until Step 4 encryption)
-    // and the response DTO does not include it at all
-    assertThat(endpoint.signingSecretCiphertext()).isEmpty();
+    // The plaintext secret is returned separately, not embedded in the response DTO
+    assertThat(result.signingSecret()).isNotNull();
+    assertThat(result.signingSecret()).startsWith("whsec_");
+    // The response DTO (EndpointResponse) does not include the plaintext secret
+    // The domain model may hold ciphertext (when encryption configured) or empty sentinel
   }
 }

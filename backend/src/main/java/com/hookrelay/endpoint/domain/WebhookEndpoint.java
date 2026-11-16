@@ -9,6 +9,8 @@ public record WebhookEndpoint(
     String url,
     String description,
     String signingSecretCiphertext,
+    byte[] nonce,
+    String keyVersion,
     boolean enabled,
     Instant createdAt,
     Instant updatedAt,

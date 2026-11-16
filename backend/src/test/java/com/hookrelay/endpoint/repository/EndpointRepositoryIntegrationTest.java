@@ -88,14 +88,17 @@ class EndpointRepositoryIntegrationTest {
     UUID id = UUID.randomUUID();
     jdbcTemplate.update(
         """
-        INSERT INTO endpoints (id, project_id, url, description, signing_secret_ciphertext, enabled, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, now(), now())
+        INSERT INTO endpoints (id, project_id, url, description, signing_secret_ciphertext,
+                               signing_secret_nonce, signing_secret_key_version, enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, now(), now())
         """,
         id,
         projectId,
         url,
         "Test endpoint",
         "encrypted-ciphertext-placeholder",
+        new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+        "v1",
         enabled);
     return new WebhookEndpoint(
         id,
@@ -103,6 +106,8 @@ class EndpointRepositoryIntegrationTest {
         url,
         "Test endpoint",
         "encrypted-ciphertext-placeholder",
+        new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+        "v1",
         enabled,
         Instant.now(),
         Instant.now(),
@@ -198,6 +203,8 @@ class EndpointRepositoryIntegrationTest {
             "https://new.example.com/webhook",
             "New endpoint",
             "encrypted-ciphertext",
+            new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+            "v1",
             true,
             null,
             null,
@@ -234,6 +241,8 @@ class EndpointRepositoryIntegrationTest {
             "https://new.example.com/webhook",
             "Updated description",
             beforeUpdate.signingSecretCiphertext(),
+            beforeUpdate.nonce(),
+            beforeUpdate.keyVersion(),
             false,
             beforeUpdate.createdAt(),
             beforeUpdate.updatedAt(),

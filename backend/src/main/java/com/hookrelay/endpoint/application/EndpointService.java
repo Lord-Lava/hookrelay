@@ -2,6 +2,7 @@ package com.hookrelay.endpoint.application;
 
 import com.hookrelay.endpoint.domain.WebhookEndpoint;
 import com.hookrelay.endpoint.repository.WebhookEndpointRepository;
+import com.hookrelay.security.SigningSecretService;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -15,31 +16,61 @@ import org.springframework.transaction.annotation.Transactional;
 public class EndpointService {
 
   private final WebhookEndpointRepository endpointRepository;
+  private final SigningSecretService signingSecretService;
 
-  public EndpointService(WebhookEndpointRepository endpointRepository) {
+  public EndpointService(
+      WebhookEndpointRepository endpointRepository, SigningSecretService signingSecretService) {
     this.endpointRepository = endpointRepository;
+    this.signingSecretService = signingSecretService;
   }
 
+  /**
+   * Creates an endpoint and generates a new signing secret. The plaintext secret is returned once
+   * alongside the persisted endpoint; it is never stored in plaintext.
+   */
   @Transactional
-  public WebhookEndpoint createEndpoint(UUID projectId, String url, String description) {
+  public CreatedEndpointResult createEndpoint(UUID projectId, String url, String description) {
     validateUrlHost(url);
 
-    // Fast pre-check for duplicate URL (case-insensitive) to give a clear error before hitting
-    // the database. The partial unique index (V3 migration) is the backstop that prevents
-    // race conditions between concurrent requests.
     List<WebhookEndpoint> existing = endpointRepository.findByProject(projectId);
     if (existing.stream().anyMatch(e -> e.url().equalsIgnoreCase(url))) {
       throw new EndpointAlreadyExistsException(
           "Endpoint URL already exists for this project: " + url);
     }
 
-    // Signing secret encryption is implemented in a later step. Until then, store an empty
-    // ciphertext sentinel (NOT a plaintext secret) to satisfy the NOT NULL column constraint.
-    // Do not expose this value through any API response.
+    if (!signingSecretService.isConfigured()) {
+      // No encryption key configured - store empty ciphertext sentinel (backward compatible)
+      // Do not expose this value through any API response.
+      WebhookEndpoint endpoint =
+          new WebhookEndpoint(
+              null, projectId, url, description, "", null, null, true, null, null, null);
+      try {
+        return new CreatedEndpointResult(endpointRepository.save(endpoint), null);
+      } catch (DataIntegrityViolationException exception) {
+        throw new EndpointAlreadyExistsException(
+            "Endpoint URL already exists for this project: " + url, exception);
+      }
+    }
+
+    String plaintextSecret = signingSecretService.generateSecret();
+    SigningSecretService.EncryptedSecret encrypted = signingSecretService.encrypt(plaintextSecret);
+
     WebhookEndpoint endpoint =
-        new WebhookEndpoint(null, projectId, url, description, "", true, null, null, null);
+        new WebhookEndpoint(
+            null,
+            projectId,
+            url,
+            description,
+            encrypted.ciphertext(),
+            encrypted.nonce(),
+            encrypted.keyVersion(),
+            true,
+            null,
+            null,
+            null);
     try {
-      return endpointRepository.save(endpoint);
+      WebhookEndpoint saved = endpointRepository.save(endpoint);
+      return new CreatedEndpointResult(saved, plaintextSecret);
     } catch (DataIntegrityViolationException exception) {
       throw new EndpointAlreadyExistsException(
           "Endpoint URL already exists for this project: " + url, exception);
@@ -70,8 +101,6 @@ public class EndpointService {
     if (!resolvedUrl.equals(existing.url())) {
       validateUrlHost(resolvedUrl);
 
-      // Fast pre-check for duplicate URL (case-insensitive), excluding self. The partial unique
-      // index (V3 migration) is the backstop that prevents race conditions.
       List<WebhookEndpoint> existingEndpoints = endpointRepository.findByProject(projectId);
       if (existingEndpoints.stream()
           .anyMatch(e -> !e.id().equals(id) && e.url().equalsIgnoreCase(resolvedUrl))) {
@@ -87,6 +116,8 @@ public class EndpointService {
             resolvedUrl,
             description != null ? description : existing.description(),
             existing.signingSecretCiphertext(),
+            existing.nonce(),
+            existing.keyVersion(),
             enabled != null ? enabled : existing.enabled(),
             existing.createdAt(),
             null,
@@ -112,6 +143,8 @@ public class EndpointService {
             existing.url(),
             existing.description(),
             existing.signingSecretCiphertext(),
+            existing.nonce(),
+            existing.keyVersion(),
             true,
             existing.createdAt(),
             null,
@@ -132,6 +165,8 @@ public class EndpointService {
             existing.url(),
             existing.description(),
             existing.signingSecretCiphertext(),
+            existing.nonce(),
+            existing.keyVersion(),
             false,
             existing.createdAt(),
             null,
@@ -148,27 +183,37 @@ public class EndpointService {
   }
 
   /**
-   * Validates the URL host against SSRF risks. Only HTTPS is allowed (enforced separately by the
-   * request DTO's {@code @Pattern}). Rejects loopback, private, link-local, multicast, reserved,
-   * unspecified, IPv4-mapped, and cloud metadata addresses, including IPv6 equivalents.
-   *
-   * <p>Hostnames are resolved via DNS; each resolved address is checked. IP literals are checked
-   * directly without DNS. If a hostname cannot be resolved, validation passes (the HTTPS scheme
-   * check already applies and the connection will fail at delivery time anyway).
+   * Decrypts and returns the plaintext signing secret for an endpoint. Used internally by delivery
+   * signing; never exposed through API responses.
    */
+  public String getSigningSecret(UUID id, UUID projectId) {
+    if (signingSecretService == null) {
+      throw new IllegalStateException("Signing secret encryption is not configured");
+    }
+    WebhookEndpoint endpoint = getEndpoint(id, projectId);
+    if (endpoint.signingSecretCiphertext() == null
+        || endpoint.signingSecretCiphertext().isBlank()
+        || endpoint.nonce() == null
+        || endpoint.keyVersion() == null) {
+      throw new IllegalStateException("Endpoint has no signing secret configured: " + id);
+    }
+    return signingSecretService.decrypt(
+        endpoint.signingSecretCiphertext(), endpoint.nonce(), endpoint.keyVersion());
+  }
+
   private void validateUrlHost(String url) {
     try {
       URI uri = URI.create(url);
       String host = uri.getHost();
       if (host == null || host.isBlank()) {
-        return; // scheme validation covers this case
+        return;
       }
 
       InetAddress[] addresses;
       try {
         addresses = InetAddress.getAllByName(host);
       } catch (UnknownHostException e) {
-        return; // hostname not resolvable; scheme validation still applies
+        return;
       }
 
       for (InetAddress address : addresses) {
@@ -186,4 +231,7 @@ public class EndpointService {
       // Malformed URL - scheme validation covers this; do not fail SSRF validation on parse errors.
     }
   }
+
+  /** Holds the result of creating an endpoint, including the plaintext signing secret. */
+  public record CreatedEndpointResult(WebhookEndpoint endpoint, String signingSecret) {}
 }

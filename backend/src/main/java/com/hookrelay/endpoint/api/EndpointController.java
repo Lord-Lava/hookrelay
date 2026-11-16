@@ -28,12 +28,12 @@ public class EndpointController {
   }
 
   @PostMapping
-  public ResponseEntity<EndpointResponse> createEndpoint(
+  public ResponseEntity<CreatedEndpointResponse> createEndpoint(
       @RequestBody @Valid EndpointCreateRequest request) {
     UUID projectId = TenantContext.require().projectId();
-    WebhookEndpoint endpoint =
+    EndpointService.CreatedEndpointResult result =
         endpointService.createEndpoint(projectId, request.url(), request.description());
-    return ResponseEntity.status(201).body(toResponse(endpoint));
+    return ResponseEntity.status(201).body(toCreatedResponse(result));
   }
 
   @GetMapping
@@ -88,6 +88,19 @@ public class EndpointController {
     UUID projectId = TenantContext.require().projectId();
     endpointService.deleteEndpoint(endpointId, projectId);
     return ResponseEntity.noContent().build();
+  }
+
+  private CreatedEndpointResponse toCreatedResponse(EndpointService.CreatedEndpointResult result) {
+    WebhookEndpoint endpoint = result.endpoint();
+    return new CreatedEndpointResponse(
+        endpoint.id(),
+        endpoint.projectId(),
+        endpoint.url(),
+        endpoint.description(),
+        result.signingSecret(),
+        endpoint.enabled(),
+        endpoint.createdAt(),
+        endpoint.updatedAt());
   }
 
   private EndpointResponse toResponse(WebhookEndpoint endpoint) {

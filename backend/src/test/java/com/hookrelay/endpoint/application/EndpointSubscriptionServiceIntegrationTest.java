@@ -85,7 +85,17 @@ class EndpointSubscriptionServiceIntegrationTest {
 
     WebhookEndpoint endpoint =
         new WebhookEndpoint(
-            null, projectId, "https://example.com/webhook", "Test", "", true, null, null, null);
+            null,
+            projectId,
+            "https://example.com/webhook",
+            "Test",
+            "",
+            new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+            "v1",
+            true,
+            null,
+            null,
+            null);
     endpointId = endpointRepository.save(endpoint).id();
 
     WebhookEndpoint otherEndpoint =
@@ -95,6 +105,8 @@ class EndpointSubscriptionServiceIntegrationTest {
             "https://other.example.com/webhook",
             "Other",
             "",
+            new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+            "v1",
             true,
             null,
             null,

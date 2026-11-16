@@ -22,7 +22,8 @@ public class WebhookEndpointRepository {
   public Optional<WebhookEndpoint> findByIdAndProject(UUID id, UUID projectId) {
     return jdbcTemplate.query(
         """
-        SELECT id, project_id, url, description, signing_secret_ciphertext, enabled,
+        SELECT id, project_id, url, description, signing_secret_ciphertext,
+               signing_secret_nonce, signing_secret_key_version, enabled,
                created_at, updated_at, deleted_at
         FROM endpoints
         WHERE id = ? AND project_id = ? AND deleted_at IS NULL
@@ -40,7 +41,8 @@ public class WebhookEndpointRepository {
   public List<WebhookEndpoint> findByProjectPaginated(UUID projectId, int offset, int limit) {
     return jdbcTemplate.query(
         """
-        SELECT id, project_id, url, description, signing_secret_ciphertext, enabled,
+        SELECT id, project_id, url, description, signing_secret_ciphertext,
+               signing_secret_nonce, signing_secret_key_version, enabled,
                created_at, updated_at, deleted_at
         FROM endpoints
         WHERE project_id = ? AND deleted_at IS NULL
@@ -62,7 +64,8 @@ public class WebhookEndpointRepository {
   public List<WebhookEndpoint> findByProject(UUID projectId) {
     return jdbcTemplate.query(
         """
-        SELECT id, project_id, url, description, signing_secret_ciphertext, enabled,
+        SELECT id, project_id, url, description, signing_secret_ciphertext,
+               signing_secret_nonce, signing_secret_key_version, enabled,
                created_at, updated_at, deleted_at
         FROM endpoints
         WHERE project_id = ? AND deleted_at IS NULL
@@ -96,9 +99,11 @@ public class WebhookEndpointRepository {
     UUID id = UUID.randomUUID();
     return jdbcTemplate.queryForObject(
         """
-        INSERT INTO endpoints (id, project_id, url, description, signing_secret_ciphertext, enabled, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, now(), now())
-        RETURNING id, project_id, url, description, signing_secret_ciphertext, enabled,
+        INSERT INTO endpoints (id, project_id, url, description, signing_secret_ciphertext,
+                               signing_secret_nonce, signing_secret_key_version, enabled, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, now(), now())
+        RETURNING id, project_id, url, description, signing_secret_ciphertext,
+                  signing_secret_nonce, signing_secret_key_version, enabled,
                   created_at, updated_at, deleted_at
         """,
         (rs, rowNum) -> mapRow(rs),
@@ -107,6 +112,8 @@ public class WebhookEndpointRepository {
         endpoint.url(),
         endpoint.description(),
         endpoint.signingSecretCiphertext(),
+        endpoint.nonce(),
+        endpoint.keyVersion(),
         endpoint.enabled());
   }
 
@@ -151,6 +158,8 @@ public class WebhookEndpointRepository {
         rs.getString("url"),
         rs.getString("description"),
         rs.getString("signing_secret_ciphertext"),
+        rs.getBytes("signing_secret_nonce"),
+        rs.getString("signing_secret_key_version"),
         rs.getBoolean("enabled"),
         rs.getTimestamp("created_at").toInstant(),
         rs.getTimestamp("updated_at").toInstant(),
