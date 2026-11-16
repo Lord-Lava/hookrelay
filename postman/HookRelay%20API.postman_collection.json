@@ -105,7 +105,7 @@
                   "    var json = pm.response.json();",
                   "    pm.expect(json).to.have.property(\"eventId\");",
                   "    pm.expect(json.eventId).to.not.be.empty;",
-                  "    pm.collectionVariables.set(\"lastEventId\", json.eventId);",
+                  "    pm.environment.set(\"lastEventId\", json.eventId);",
                   "});",
                   "",
                   "pm.test(\"Response body has createdAt\", function () {",
@@ -183,7 +183,7 @@
                   "pm.test(\"Response body has eventId matching original\", function () {",
                   "    var json = pm.response.json();",
                   "    pm.expect(json).to.have.property(\"eventId\");",
-                  "    pm.expect(json.eventId).to.equal(pm.collectionVariables.get(\"lastEventId\"));",
+                  "    pm.expect(json.eventId).to.equal(pm.environment.get(\"lastEventId\"));",
                   "});"
                 ]
               }
@@ -547,7 +547,7 @@
                   "if (pm.response.code === 201) {",
                   "    pm.expect(responseJson).to.have.property(\"id\");",
                   "    pm.expect(responseJson.id).to.not.be.empty;",
-                  "    pm.collectionVariables.set(\"createdEndpointId\", responseJson.id);",
+                  "    pm.environment.set(\"createdEndpointId\", responseJson.id);",
                   "    pm.test(\"Response body has projectId\", function () {",
                   "        pm.expect(responseJson).to.have.property(\"projectId\");",
                   "    });",
@@ -586,7 +586,7 @@
                   "            return e.url === \"https://example.com/webhook\";",
                   "        });",
                   "        if (existing) {",
-                  "            pm.collectionVariables.set(\"createdEndpointId\", existing.id);",
+                  "            pm.environment.set(\"createdEndpointId\", existing.id);",
                   "        }",
                   "    });",
                   "}"
@@ -1249,7 +1249,7 @@
                   "",
                   "pm.test(\"Response body matches created endpoint\", function () {",
                   "    var json = pm.response.json();",
-                  "    pm.expect(json.id).to.equal(pm.collectionVariables.get(\"createdEndpointId\"));",
+                  "    pm.expect(json.id).to.equal(pm.environment.get(\"createdEndpointId\"));",
                   "    pm.expect(json.url).to.equal(\"https://example.com/webhook\");",
                   "    pm.expect(json.enabled).to.equal(true);",
                   "});",
@@ -1394,7 +1394,7 @@
                   "",
                   "pm.test(\"Response body has updated fields\", function () {",
                   "    var json = pm.response.json();",
-                  "    pm.expect(json.id).to.equal(pm.collectionVariables.get(\"createdEndpointId\"));",
+                  "    pm.expect(json.id).to.equal(pm.environment.get(\"createdEndpointId\"));",
                   "    pm.expect(json.url).to.equal(\"https://example.com/webhook-updated\");",
                   "    pm.expect(json.description).to.equal(\"Updated smoke test endpoint\");",
                   "    pm.expect(json.enabled).to.equal(false);",
@@ -1453,8 +1453,8 @@
                     "if (pm.response.code === 201) {",
                     "    var json = pm.response.json();",
                     "    pm.expect(json).to.have.property(\"id\");",
-                    "    pm.collectionVariables.set(\"secondEndpointId\", json.id);",
-                    "    pm.collectionVariables.set(\"secondEndpointUrl\", json.url);",
+                    "    pm.environment.set(\"secondEndpointId\", json.id);",
+                    "    pm.environment.set(\"secondEndpointUrl\", json.url);",
                     "} else if (pm.response.code === 409) {",
                     "    pm.sendRequest({",
                     "        url: pm.environment.get(\"base_url\") + \"/v1/endpoints?page=0&size=20\",",
@@ -1467,8 +1467,8 @@
                     "            return e.url === \"https://example.com/webhook2\";",
                     "        });",
                     "        if (existing) {",
-                    "            pm.collectionVariables.set(\"secondEndpointId\", existing.id);",
-                    "            pm.collectionVariables.set(\"secondEndpointUrl\", existing.url);",
+                    "            pm.environment.set(\"secondEndpointId\", existing.id);",
+                    "            pm.environment.set(\"secondEndpointUrl\", existing.url);",
                     "        }",
                     "    });",
                     "}"
@@ -1802,6 +1802,549 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Subscription Management",
+      "item": [
+        {
+          "name": "Setup: Create dedicated endpoint for subscription tests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"url\":\"https://subscriptions.example.com/webhook\",\"description\":\"Subscription test endpoint\"}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints"
+              ]
+            },
+            "description": "Creates a dedicated endpoint for subscription testing."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Response has endpoint ID\", function () {",
+                  "    pm.expect(json).to.have.property(\"id\");",
+                  "    pm.expect(json.id).to.not.be.empty;",
+                  "    pm.environment.set(\"subscriptionEndpointId\", json.id);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has expected URL\", function () {",
+                  "    pm.expect(json.url).to.equal(\"https://subscriptions.example.com/webhook\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Create subscription successfully",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/payment.succeeded",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}",
+                "subscriptions",
+                "payment.succeeded"
+              ]
+            },
+            "description": "Creates a subscription for an event type on an endpoint. Expects 201 Created."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "pm.test(\"Response body has id\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json).to.have.property(\"id\");",
+                  "    pm.expect(json.id).to.not.be.empty;",
+                  "    pm.environment.set(\"subscriptionId\", json.id);",
+                  "});",
+                  "",
+                  "pm.test(\"Response body has endpointId\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.endpointId).to.equal(pm.environment.get(\"subscriptionEndpointId\"));",
+                  "});",
+                  "",
+                  "pm.test(\"Response body has eventType\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.eventType).to.equal(\"payment.succeeded\");",
+                  "});",
+                  "",
+                  "pm.test(\"Response body has createdAt\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json).to.have.property(\"createdAt\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Idempotent duplicate returns same",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/payment.succeeded",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}",
+                "subscriptions",
+                "payment.succeeded"
+              ]
+            },
+            "description": "Creates the same subscription again. Expects 200 OK with the same subscription ID (idempotent)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response body returns same subscription ID\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.id).to.equal(pm.environment.get(\"subscriptionId\"));",
+                  "});",
+                  "",
+                  "pm.test(\"Response body has eventType\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.eventType).to.equal(\"payment.succeeded\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Invalid event type rejected",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/INVALID_TYPE",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}",
+                "subscriptions",
+                "INVALID_TYPE"
+              ]
+            },
+            "description": "Creates a subscription with an invalid event type (uppercase). Expects 400 Bad Request."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Unknown endpoint rejected",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000/subscriptions/payment.succeeded",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "00000000-0000-0000-0000-000000000000",
+                "subscriptions",
+                "payment.succeeded"
+              ]
+            },
+            "description": "Creates a subscription on a nonexistent endpoint. Expects 404 Not Found."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(404);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Missing authentication",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/payment.succeeded",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}",
+                "subscriptions",
+                "payment.succeeded"
+              ]
+            },
+            "description": "Creates a subscription without the X-Api-Key header. Expects 401 Unauthorized."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /v1/endpoints/{endpointId}/subscriptions/{eventType} - Delete subscription successfully",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/payment.succeeded",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}",
+                "subscriptions",
+                "payment.succeeded"
+              ]
+            },
+            "description": "Deletes a subscription from an endpoint. Expects 204 No Content."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 204\", function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});",
+                  "",
+                  "pm.test(\"Response body is empty\", function () {",
+                  "    pm.expect(pm.response.text()).to.equal(\"\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "DELETE /v1/endpoints/{endpointId}/subscriptions/{eventType} - Delete nonexistent subscription",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/nonexistent.type",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}",
+                "subscriptions",
+                "nonexistent.type"
+              ]
+            },
+            "description": "Deletes a subscription that does not exist. Expects 404 Not Found."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(404);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/endpoints/{endpointId}/subscriptions - List subscriptions successfully",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions?page=0&size=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}",
+                "subscriptions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Lists subscriptions for an endpoint. Expects 200 OK."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response body has subscriptions array\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json).to.have.property(\"subscriptions\");",
+                  "    pm.expect(json.subscriptions).to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "pm.test(\"Response body has pagination fields\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json).to.have.property(\"page\");",
+                  "    pm.expect(json).to.have.property(\"size\");",
+                  "    pm.expect(json).to.have.property(\"total\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /v1/endpoints/{endpointId}/subscriptions - Unknown endpoint rejected",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000/subscriptions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "00000000-0000-0000-0000-000000000000",
+                "subscriptions"
+              ]
+            },
+            "description": "Lists subscriptions for a nonexistent endpoint. Expects 404 Not Found."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(404);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Teardown: Delete dedicated endpoint",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{subscriptionEndpointId}}"
+              ]
+            },
+            "description": "Deletes the dedicated subscription test endpoint. Expects 204 No Content."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 204\", function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});",
+                  "",
+                  "pm.test(\"Response body is empty\", function () {",
+                  "    pm.expect(pm.response.text()).to.equal(\"\");",
+                  "});",
+                  "",
+                  "pm.environment.unset(\"subscriptionEndpointId\");",
+                  "pm.environment.unset(\"subscriptionId\");"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
@@ -1818,6 +2361,26 @@
     {
       "key": "project_id",
       "value": "PLACEHOLDER_PROJECT_ID",
+      "type": "string"
+    },
+    {
+      "key": "createdEndpointId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "secondEndpointId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "secondEndpointUrl",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "subscriptionId",
+      "value": "",
       "type": "string"
     }
   ]

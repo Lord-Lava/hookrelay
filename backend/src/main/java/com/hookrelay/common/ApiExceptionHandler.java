@@ -3,6 +3,7 @@ package com.hookrelay.common;
 import com.hookrelay.auth.AuthenticationRequiredException;
 import com.hookrelay.endpoint.application.EndpointAlreadyExistsException;
 import com.hookrelay.endpoint.application.EndpointNotFoundException;
+import com.hookrelay.endpoint.application.SubscriptionNotFoundException;
 import com.hookrelay.event.application.IdempotencyConflictException;
 import java.net.URI;
 import java.time.Instant;
@@ -54,6 +55,13 @@ public class ApiExceptionHandler {
       EndpointAlreadyExistsException exception) {
     return ResponseEntity.status(HttpStatus.CONFLICT)
         .body(problem(HttpStatus.CONFLICT, exception.getMessage()));
+  }
+
+  @ExceptionHandler(SubscriptionNotFoundException.class)
+  public ResponseEntity<ProblemDetail> handleSubscriptionNotFound(
+      SubscriptionNotFoundException exception) {
+    return ResponseEntity.status(HttpStatus.NOT_FOUND)
+        .body(problem(HttpStatus.NOT_FOUND, exception.getMessage()));
   }
 
   @ExceptionHandler(AuthenticationRequiredException.class)

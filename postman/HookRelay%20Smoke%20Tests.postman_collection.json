@@ -711,6 +711,257 @@
           ]
         }
       ]
+    },
+    {
+      "name": "Smoke: Subscription Management",
+      "item": [
+        {
+          "name": "Smoke: Create subscription",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}/subscriptions/payment.succeeded",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}",
+                "subscriptions",
+                "payment.succeeded"
+              ]
+            },
+            "description": "Creates a subscription on the smoke test endpoint. Expects 201 Created."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Response has subscription ID\", function () {",
+                  "    pm.expect(json).to.have.property(\"id\");",
+                  "    pm.expect(json.id).to.not.be.empty;",
+                  "    pm.collectionVariables.set(\"smokeSubscriptionId\", json.id);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has eventType payment.succeeded\", function () {",
+                  "    pm.expect(json.eventType).to.equal(\"payment.succeeded\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Idempotent duplicate subscription",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}/subscriptions/payment.succeeded",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}",
+                "subscriptions",
+                "payment.succeeded"
+              ]
+            },
+            "description": "Creates the same subscription again. Expects 200 OK with same ID."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Response returns same subscription ID\", function () {",
+                  "    pm.expect(json.id).to.equal(pm.collectionVariables.get(\"smokeSubscriptionId\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: List subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}/subscriptions?page=0&size=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}",
+                "subscriptions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Lists subscriptions for the smoke test endpoint. Expects 200 OK."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Response has subscriptions array\", function () {",
+                  "    pm.expect(json).to.have.property(\"subscriptions\");",
+                  "    pm.expect(json.subscriptions).to.be.an(\"array\");",
+                  "});",
+                  "",
+                  "pm.test(\"Response has pagination fields\", function () {",
+                  "    pm.expect(json).to.have.property(\"page\");",
+                  "    pm.expect(json).to.have.property(\"size\");",
+                  "    pm.expect(json).to.have.property(\"total\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Delete subscription",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}/subscriptions/payment.succeeded",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}",
+                "subscriptions",
+                "payment.succeeded"
+              ]
+            },
+            "description": "Deletes the subscription from the smoke test endpoint. Expects 204 No Content."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 204\", function () {",
+                  "    pm.response.to.have.status(204);",
+                  "});",
+                  "",
+                  "pm.test(\"Response body is empty\", function () {",
+                  "    pm.expect(pm.response.text()).to.equal(\"\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Invalid event type rejected",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}/subscriptions/INVALID_TYPE",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}",
+                "subscriptions",
+                "INVALID_TYPE"
+              ]
+            },
+            "description": "Attempts to create a subscription with an invalid event type. Expects 400 Bad Request."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(400);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [

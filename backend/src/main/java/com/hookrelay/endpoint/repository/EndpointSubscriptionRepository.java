@@ -150,6 +150,60 @@ public class EndpointSubscriptionRepository {
         projectId);
   }
 
+  public int softDeleteByEndpointIdAndEventTypeAndProject(
+      UUID endpointId, String eventType, UUID projectId) {
+    return jdbcTemplate.update(
+        """
+        UPDATE endpoint_subscriptions s
+        SET deleted_at = now()
+        FROM endpoints e
+        WHERE e.id = s.endpoint_id AND s.endpoint_id = ? AND s.event_type = ? AND e.project_id = ?
+          AND s.deleted_at IS NULL AND e.deleted_at IS NULL
+        """,
+        endpointId,
+        eventType,
+        projectId);
+  }
+
+  public List<EndpointSubscription> findByEndpointIdAndProjectPaginated(
+      UUID endpointId, UUID projectId, int offset, int limit) {
+    return jdbcTemplate.query(
+        """
+        SELECT s.id, s.endpoint_id, s.event_type, s.created_at, s.deleted_at
+        FROM endpoint_subscriptions s
+        JOIN endpoints e ON e.id = s.endpoint_id
+        WHERE s.endpoint_id = ? AND e.project_id = ?
+          AND s.deleted_at IS NULL AND e.deleted_at IS NULL
+        ORDER BY s.created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        rs -> {
+          List<EndpointSubscription> subscriptions = new ArrayList<>();
+          while (rs.next()) {
+            subscriptions.add(mapRow(rs));
+          }
+          return subscriptions;
+        },
+        endpointId,
+        projectId,
+        limit,
+        offset);
+  }
+
+  public int countByEndpointIdAndProject(UUID endpointId, UUID projectId) {
+    return jdbcTemplate.queryForObject(
+        """
+        SELECT COUNT(*)
+        FROM endpoint_subscriptions s
+        JOIN endpoints e ON e.id = s.endpoint_id
+        WHERE s.endpoint_id = ? AND e.project_id = ?
+          AND s.deleted_at IS NULL AND e.deleted_at IS NULL
+        """,
+        (rs, rowNum) -> rs.getInt(1),
+        endpointId,
+        projectId);
+  }
+
   private EndpointSubscription mapRow(ResultSet rs) throws SQLException {
     return new EndpointSubscription(
         rs.getObject("id", UUID.class),
