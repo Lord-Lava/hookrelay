@@ -87,7 +87,7 @@ class EndpointSubscriptionServiceIntegrationTest {
         new WebhookEndpoint(
             null,
             projectId,
-            "https://example.com/webhook",
+            "https://198.51.100.10/webhook",
             "Test",
             "",
             new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
@@ -102,7 +102,7 @@ class EndpointSubscriptionServiceIntegrationTest {
         new WebhookEndpoint(
             null,
             otherProjectId,
-            "https://other.example.com/webhook",
+            "https://192.0.2.50/webhook",
             "Other",
             "",
             new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},

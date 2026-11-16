@@ -85,7 +85,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   @Test
   void createEndpointReturnsPlaintextSecretOnce() {
     EndpointService.CreatedEndpointResult result =
-        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
 
     assertThat(result.endpoint().id()).isNotNull();
     assertThat(result.signingSecret()).startsWith("whsec_");
@@ -95,7 +95,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   @Test
   void plaintextSecretIsNotStoredInDatabase() {
     EndpointService.CreatedEndpointResult result =
-        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
 
     WebhookEndpoint stored =
         endpointRepository.findByIdAndProject(result.endpoint().id(), projectId).orElseThrow();
@@ -113,7 +113,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   @Test
   void getSigningSecretDecryptsStoredCiphertext() {
     EndpointService.CreatedEndpointResult result =
-        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
 
     String decrypted = endpointService.getSigningSecret(result.endpoint().id(), projectId);
     assertThat(decrypted).isEqualTo(result.signingSecret());
@@ -137,7 +137,7 @@ class EndpointServiceSigningSecretIntegrationTest {
 
   @Test
   void listEndpointsDoesNotExposePlaintextSecret() {
-    endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+    endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
 
     var endpoints = endpointService.listEndpoints(projectId, 0, 20);
     assertThat(endpoints).hasSize(1);
@@ -149,7 +149,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   @Test
   void crossProjectCannotReadSigningSecret() {
     EndpointService.CreatedEndpointResult result =
-        endpointService.createEndpoint(projectId, "https://example.com/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
 
     UUID otherProjectId = UUID.fromString("dddddddd-4444-4444-8444-dddddddddddd");
     jdbcTemplate.update(

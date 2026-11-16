@@ -10,9 +10,9 @@ class DefaultSsrfUrlValidatorTest {
 
   @Test
   void acceptsPublicHttpsUrl() {
-    validator.validate("https://example.com/webhook");
-    validator.validate("https://api.example.com:443/webhook");
-    validator.validate("https://example.com:443/path?query=1#fragment");
+    validator.validate("https://93.184.216.34/webhook");
+    validator.validate("https://93.184.216.34:443/webhook");
+    validator.validate("https://93.184.216.34:443/path?query=1#fragment");
   }
 
   @Test
@@ -171,5 +171,63 @@ class DefaultSsrfUrlValidatorTest {
     // Public IP literals pass validation (DNS-based mixed results are verified
     // at the integration layer where InetAddress resolution can be controlled).
     validator.validate("https://93.184.216.34/webhook");
+  }
+
+  @Test
+  void rejectsIpv4ReservedRange() {
+    // 240.0.0.0/4 - Reserved
+    assertThatThrownBy(() -> validator.validate("https://240.0.0.1/webhook"))
+        .isInstanceOf(SsrfValidationException.class);
+    assertThatThrownBy(() -> validator.validate("https://255.0.0.1/webhook"))
+        .isInstanceOf(SsrfValidationException.class);
+    assertThatThrownBy(() -> validator.validate("https://255.255.255.0/webhook"))
+        .isInstanceOf(SsrfValidationException.class);
+  }
+
+  @Test
+  void rejectsIpv4LimitedBroadcast() {
+    // 255.255.255.255 - Limited broadcast
+    assertThatThrownBy(() -> validator.validate("https://255.255.255.255/webhook"))
+        .isInstanceOf(SsrfValidationException.class);
+  }
+
+  @Test
+  void rejectsTrailingDotHostname() {
+    // Trailing dot (FQDN indicator) is stripped before validation
+    assertThatThrownBy(() -> validator.validate("https://localhost./webhook"))
+        .isInstanceOf(SsrfValidationException.class)
+        .hasMessageContaining("URL host is not allowed");
+  }
+
+  @Test
+  void rejectsIpv4OctalLikeNotation() {
+    // Leading zeros are treated as decimal by Java's InetAddress, not octal.
+    // 010 = 10 (decimal), so 010.0.0.1 = 10.0.0.1 (RFC1918 private).
+    assertThatThrownBy(() -> validator.validate("https://010.0.0.1/webhook"))
+        .isInstanceOf(SsrfValidationException.class)
+        .hasMessageContaining("URL host is not allowed");
+  }
+
+  @Test
+  void rejectsUsernameOnlyCredentials() {
+    // User info without password is still credentials
+    assertThatThrownBy(() -> validator.validate("https://user@127.0.0.1/webhook"))
+        .isInstanceOf(SsrfValidationException.class)
+        .hasMessageContaining("URL credentials");
+  }
+
+  @Test
+  void rejectsUnresolvableHostname() {
+    // DNS failure must fail closed (no pass-through)
+    assertThatThrownBy(
+            () -> validator.validate("https://this-host-does-not-exist-12345.invalid/webhook"))
+        .isInstanceOf(SsrfValidationException.class)
+        .hasMessageContaining("Unable to resolve hostname");
+  }
+
+  @Test
+  void acceptsDocumentationRangeIpv6() {
+    // 2001:db8::/32 is documentation range, not a special-use address
+    validator.validate("https://[2001:db8::1]/webhook");
   }
 }

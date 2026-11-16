@@ -1,5 +1,6 @@
 package com.hookrelay.security.ssrf;
 
+import java.net.Inet4Address;
 import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.URI;
@@ -117,10 +118,11 @@ public class DefaultSsrfUrlValidator implements SsrfUrlValidator {
     try {
       addresses = InetAddress.getAllByName(normalized);
     } catch (UnknownHostException exception) {
-      // DNS resolution failure: fail open here. Connection-time enforcement in Phase 3
-      // is the authoritative SSRF defense; registration-time validation is a first line of
-      // defense that cannot operate without DNS.
-      return;
+      // DNS resolution failure: fail closed. A hostname that cannot be resolved
+      // cannot be validated and must be rejected. Connection-time enforcement in
+      // Phase 3 is the authoritative SSRF defense, but registration-time validation
+      // must not allow unverifiable hostnames through.
+      throw new SsrfValidationException("Unable to resolve hostname: " + normalized, exception);
     }
 
     if (addresses == null || addresses.length == 0) {
@@ -152,6 +154,13 @@ public class DefaultSsrfUrlValidator implements SsrfUrlValidator {
               + " ("
               + address.getHostAddress()
               + ")");
+    }
+
+    // Reject IPv4 reserved ranges (240.0.0.0/4 including 255.255.255.255 limited broadcast)
+    // These are not covered by Java's isSiteLocalAddress()/isMulticastAddress() methods.
+    if (address instanceof Inet4Address && isIPv4Reserved(address)) {
+      throw new SsrfValidationException(
+          "IPv4 reserved address is not allowed: " + host + " (" + address.getHostAddress() + ")");
     }
 
     if (address.isAnyLocalAddress()
@@ -186,6 +195,18 @@ public class DefaultSsrfUrlValidator implements SsrfUrlValidator {
       return false;
     }
     return (bytes[0] & 0xfe) == 0xfc;
+  }
+
+  /**
+   * Detects IPv4 reserved addresses (240.0.0.0/4). This range includes 255.255.255.255 (limited
+   * broadcast) and is not covered by Java's isSiteLocalAddress()/isMulticastAddress() methods.
+   */
+  private static boolean isIPv4Reserved(InetAddress address) {
+    byte[] bytes = address.getAddress();
+    if (bytes.length != 4) {
+      return false;
+    }
+    return (bytes[0] & 0xF0) == 0xF0;
   }
 
   /** Parsed components of a URL relevant to SSRF validation. */
