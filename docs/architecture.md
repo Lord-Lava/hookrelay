@@ -27,3 +27,18 @@ The RabbitMQ dead-letter queue is for broker-level consumer rejection/expiry. Th
 ## ADR-007: Runtime and framework baseline
 
 Use Java 25 LTS, Spring Boot 4.1.2, Gradle 9.9.1, PostgreSQL 18.7, and RabbitMQ 4.4.0 (verified 2026-11-13). Compile and run with the same Java major version. Spring Boot's BOM owns the versions of Spring Framework, Jackson, Micrometer, Flyway, pgJDBC, and other managed dependencies. See `docs/stack-versions.md` for current patch-level evidence, build plugins, checksums, and official references. Update deliberately after compatibility review and all checks.
+
+## ADR-008: Registration DNS policy and transaction boundaries
+
+Endpoint URLs permit HTTPS on port 443, without credentials, fragments or IPv6 zone identifiers.
+Literal parsing uses Java 25 `InetAddress.ofLiteral`; hostnames are resolved once and every answer
+must pass the public-address policy. Special-use IPv4 ranges and non-global IPv6 ranges are denied.
+DNS failures, mixed public/private answers, timeouts and resolver saturation fail closed with generic
+client errors. Production resolution has four workers, a 16-request queue and a two-second caller
+deadline. The platform resolver may ignore cancellation; bounded workers prevent unbounded growth.
+
+Creation and URL updates perform DNS validation before opening their write transaction. The
+registration policy is not a connection-time guarantee. There is no outbound delivery client yet;
+Phase 3 must pin every connection to a validated address, preserve TLS hostname verification and
+disable redirects. See the Java 25 InetAddress API for literal versus hostname resolution semantics:
+https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/net/InetAddress.html

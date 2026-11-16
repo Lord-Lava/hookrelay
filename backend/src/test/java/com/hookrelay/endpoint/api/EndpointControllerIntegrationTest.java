@@ -109,12 +109,12 @@ class EndpointControllerIntegrationTest {
   @Test
   void createEndpointReturnsCreatedEndpoint() {
     EndpointService.CreatedEndpointResult result =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "My endpoint");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "My endpoint");
     WebhookEndpoint endpoint = result.endpoint();
 
     assertThat(endpoint.id()).isNotNull();
     assertThat(endpoint.projectId()).isEqualTo(projectId);
-    assertThat(endpoint.url()).isEqualTo("https://198.51.100.10/webhook");
+    assertThat(endpoint.url()).isEqualTo("https://8.8.4.10/webhook");
     assertThat(endpoint.description()).isEqualTo("My endpoint");
     assertThat(endpoint.enabled()).isTrue();
     assertThat(endpoint.createdAt()).isNotNull();
@@ -130,10 +130,10 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void createEndpointRejectsDuplicateUrl() {
-    endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "First");
+    endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "First");
 
     assertThatThrownBy(() ->
-            endpointService.createEndpoint(projectId, "HTTPS://198.51.100.10/webhook", "Duplicate"))
+            endpointService.createEndpoint(projectId, "HTTPS://8.8.4.10/webhook", "Duplicate"))
         .isInstanceOf(EndpointAlreadyExistsException.class)
         .hasMessageContaining("already exists");
   }
@@ -141,13 +141,13 @@ class EndpointControllerIntegrationTest {
   @Test
   void getEndpointReturnsEndpoint() {
     EndpointService.CreatedEndpointResult createdResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
     WebhookEndpoint created = createdResult.endpoint();
 
     WebhookEndpoint found = endpointService.getEndpoint(created.id(), projectId);
 
     assertThat(found.id()).isEqualTo(created.id());
-    assertThat(found.url()).isEqualTo("https://198.51.100.10/webhook");
+    assertThat(found.url()).isEqualTo("https://8.8.4.10/webhook");
     assertThat(found.description()).isEqualTo("Test");
     assertThat(found.enabled()).isTrue();
   }
@@ -170,7 +170,7 @@ class EndpointControllerIntegrationTest {
         Timestamp.from(Instant.now()));
 
     EndpointService.CreatedEndpointResult createdResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
     WebhookEndpoint created = createdResult.endpoint();
 
     assertThatThrownBy(() -> endpointService.getEndpoint(created.id(), otherProjectId))
@@ -179,9 +179,9 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void listEndpointsReturnsCreatedEndpoints() {
-    endpointService.createEndpoint(projectId, "https://192.0.2.10/webhook", "A");
-    endpointService.createEndpoint(projectId, "https://192.0.2.20/webhook", "B");
-    endpointService.createEndpoint(projectId, "https://192.0.2.30/webhook", "C");
+    endpointService.createEndpoint(projectId, "https://8.8.8.10/webhook", "A");
+    endpointService.createEndpoint(projectId, "https://8.8.8.20/webhook", "B");
+    endpointService.createEndpoint(projectId, "https://8.8.8.30/webhook", "C");
 
     List<WebhookEndpoint> all = endpointService.listEndpoints(projectId, 0, 20);
 
@@ -192,9 +192,9 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void listEndpointsSupportsPagination() {
-    endpointService.createEndpoint(projectId, "https://192.0.2.70/webhook", "One");
-    endpointService.createEndpoint(projectId, "https://192.0.2.71/webhook", "Two");
-    endpointService.createEndpoint(projectId, "https://192.0.2.72/webhook", "Three");
+    endpointService.createEndpoint(projectId, "https://8.8.8.70/webhook", "One");
+    endpointService.createEndpoint(projectId, "https://8.8.8.71/webhook", "Two");
+    endpointService.createEndpoint(projectId, "https://8.8.8.72/webhook", "Three");
 
     List<WebhookEndpoint> page1 = endpointService.listEndpoints(projectId, 0, 2);
     List<WebhookEndpoint> page2 = endpointService.listEndpoints(projectId, 1, 2);
@@ -207,14 +207,14 @@ class EndpointControllerIntegrationTest {
   @Test
   void updateEndpointReturnsUpdatedEndpoint() {
     EndpointService.CreatedEndpointResult createdResult =
-        endpointService.createEndpoint(projectId, "https://192.0.2.41/webhook", "Old");
+        endpointService.createEndpoint(projectId, "https://8.8.8.41/webhook", "Old");
     WebhookEndpoint created = createdResult.endpoint();
 
     WebhookEndpoint updated =
         endpointService.updateEndpoint(
-            created.id(), projectId, "https://192.0.2.40/webhook", "Updated", false);
+            created.id(), projectId, "https://8.8.8.40/webhook", "Updated", false);
 
-    assertThat(updated.url()).isEqualTo("https://192.0.2.40/webhook");
+    assertThat(updated.url()).isEqualTo("https://8.8.8.40/webhook");
     assertThat(updated.description()).isEqualTo("Updated");
     assertThat(updated.enabled()).isFalse();
     assertThat(updated.createdAt()).isEqualTo(created.createdAt());
@@ -223,14 +223,14 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void updateEndpointRejectsDuplicateUrl() {
-    endpointService.createEndpoint(projectId, "https://192.0.2.60/webhook", "First");
+    endpointService.createEndpoint(projectId, "https://8.8.8.60/webhook", "First");
     EndpointService.CreatedEndpointResult secondResult =
-        endpointService.createEndpoint(projectId, "https://192.0.2.61/webhook", "Second");
+        endpointService.createEndpoint(projectId, "https://8.8.8.61/webhook", "Second");
     WebhookEndpoint second = secondResult.endpoint();
 
     assertThatThrownBy(() ->
             endpointService.updateEndpoint(
-                second.id(), projectId, "HTTPS://192.0.2.60/webhook", null, null))
+                second.id(), projectId, "HTTPS://8.8.8.60/webhook", null, null))
         .isInstanceOf(EndpointAlreadyExistsException.class);
   }
 
@@ -238,14 +238,14 @@ class EndpointControllerIntegrationTest {
   void updateEndpointRejectsUnknownEndpoint() {
     assertThatThrownBy(() ->
             endpointService.updateEndpoint(
-                UUID.randomUUID(), projectId, "https://198.51.100.10/webhook", null, null))
+                UUID.randomUUID(), projectId, "https://8.8.4.10/webhook", null, null))
         .isInstanceOf(EndpointNotFoundException.class);
   }
 
   @Test
   void enableAndDisableEndpoint() {
     EndpointService.CreatedEndpointResult createdResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
     WebhookEndpoint created = createdResult.endpoint();
 
     endpointService.disableEndpoint(created.id(), projectId);
@@ -260,7 +260,7 @@ class EndpointControllerIntegrationTest {
   @Test
   void deleteEndpointSoftDeletes() {
     EndpointService.CreatedEndpointResult createdResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
     WebhookEndpoint created = createdResult.endpoint();
 
     endpointService.deleteEndpoint(created.id(), projectId);
@@ -288,7 +288,7 @@ class EndpointControllerIntegrationTest {
         Timestamp.from(Instant.now()));
 
     EndpointService.CreatedEndpointResult createdResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
     WebhookEndpoint created = createdResult.endpoint();
 
     assertThatThrownBy(() -> endpointService.deleteEndpoint(created.id(), otherProjectId))
@@ -304,8 +304,7 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void createRequestRejectsNonHttpsUrl() {
-    EndpointCreateRequest request =
-        new EndpointCreateRequest("http://198.51.100.10/webhook", "desc");
+    EndpointCreateRequest request = new EndpointCreateRequest("http://8.8.4.10/webhook", "desc");
     Set<ConstraintViolation<EndpointCreateRequest>> violations = validator.validate(request);
     assertThat(violations).anyMatch(v -> v.getMessage().contains("HTTPS scheme"));
   }
@@ -321,16 +320,14 @@ class EndpointControllerIntegrationTest {
   @Test
   void createRequestRejectsTooLongDescription() {
     String longDesc = "a".repeat(200);
-    EndpointCreateRequest request =
-        new EndpointCreateRequest("https://198.51.100.10/webhook", longDesc);
+    EndpointCreateRequest request = new EndpointCreateRequest("https://8.8.4.10/webhook", longDesc);
     Set<ConstraintViolation<EndpointCreateRequest>> violations = validator.validate(request);
     assertThat(violations).anyMatch(v -> v.getMessage().contains("160 characters"));
   }
 
   @Test
   void createRequestAcceptsValidHttpsUrl() {
-    EndpointCreateRequest request =
-        new EndpointCreateRequest("https://198.51.100.10/webhook", "Valid");
+    EndpointCreateRequest request = new EndpointCreateRequest("https://8.8.4.10/webhook", "Valid");
     Set<ConstraintViolation<EndpointCreateRequest>> violations = validator.validate(request);
     assertThat(violations).isEmpty();
   }
@@ -345,7 +342,7 @@ class EndpointControllerIntegrationTest {
   @Test
   void responseDoesNotExposeSigningSecret() {
     EndpointService.CreatedEndpointResult result =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
 
     // The plaintext secret is returned separately, not embedded in the response DTO
     assertThat(result.signingSecret()).isNotNull();
@@ -357,7 +354,7 @@ class EndpointControllerIntegrationTest {
   @Test
   void rotateSecretReturnsNewPlaintextSecret() {
     EndpointService.CreatedEndpointResult createResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
     WebhookEndpoint endpoint = createResult.endpoint();
     String originalSecret = createResult.signingSecret();
 
@@ -381,7 +378,7 @@ class EndpointControllerIntegrationTest {
   @Test
   void rotateSecretOldSecretNoLongerDecrypts() {
     EndpointService.CreatedEndpointResult createResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
     String originalSecret = createResult.signingSecret();
 
     endpointService.rotateSigningSecret(createResult.endpoint().id(), projectId);
@@ -404,7 +401,7 @@ class EndpointControllerIntegrationTest {
   @Test
   void rotateSecretRejectsCrossProjectAccess() {
     EndpointService.CreatedEndpointResult createResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
 
     UUID otherProjectId = UUID.fromString("dddddddd-4444-4444-8444-dddddddddddd");
     jdbcTemplate.update(
@@ -423,7 +420,7 @@ class EndpointControllerIntegrationTest {
   @Test
   void rotateSecretRecordsAuditEvent() {
     EndpointService.CreatedEndpointResult createResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
 
     endpointService.rotateSigningSecret(createResult.endpoint().id(), projectId);
 
@@ -447,7 +444,7 @@ class EndpointControllerIntegrationTest {
   @Test
   void rotateSecretDomainModelDoesNotContainPlaintext() {
     EndpointService.CreatedEndpointResult createResult =
-        endpointService.createEndpoint(projectId, "https://198.51.100.10/webhook", "Test");
+        endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
     String originalSecret = createResult.signingSecret();
 
     EndpointService.RotateSecretResult rotateResult =
@@ -470,5 +467,32 @@ class EndpointControllerIntegrationTest {
     // environment has encryption configured, this test documents the expected
     // behavior via the service layer guard.
     assertThat(endpointService).isNotNull();
+  }
+
+  @Autowired private com.hookrelay.security.SigningSecretService secrets;
+  @Autowired private tools.jackson.databind.ObjectMapper mapper;
+  @Autowired private org.springframework.transaction.support.TransactionTemplate transactions;
+
+  @Test
+  void resolvesDnsOutsideDatabaseTransactions() {
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    var service =
+        new EndpointService(
+            endpointRepository,
+            secrets,
+            jdbcTemplate,
+            mapper,
+            url -> {
+              assertThat(
+                      org.springframework.transaction.support.TransactionSynchronizationManager
+                          .isActualTransactionActive())
+                  .isFalse();
+              calls.incrementAndGet();
+            },
+            transactions);
+    var endpoint =
+        service.createEndpoint(projectId, "https://customer.example/hook", "test").endpoint();
+    service.updateEndpoint(endpoint.id(), projectId, "https://customer.example/other", null, null);
+    assertThat(calls.get()).isEqualTo(2);
   }
 }

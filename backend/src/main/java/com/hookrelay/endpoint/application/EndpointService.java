@@ -21,27 +21,34 @@ public class EndpointService {
   private final JdbcTemplate jdbcTemplate;
   private final ObjectMapper objectMapper;
   private final SsrfUrlValidator ssrfUrlValidator;
+  private final org.springframework.transaction.support.TransactionTemplate transactions;
 
   public EndpointService(
       WebhookEndpointRepository endpointRepository,
       SigningSecretService signingSecretService,
       JdbcTemplate jdbcTemplate,
       ObjectMapper objectMapper,
-      SsrfUrlValidator ssrfUrlValidator) {
+      SsrfUrlValidator ssrfUrlValidator,
+      org.springframework.transaction.support.TransactionTemplate transactions) {
     this.endpointRepository = endpointRepository;
     this.signingSecretService = signingSecretService;
     this.jdbcTemplate = jdbcTemplate;
     this.objectMapper = objectMapper;
     this.ssrfUrlValidator = ssrfUrlValidator;
+    this.transactions = transactions;
   }
 
   /**
    * Creates an endpoint and generates a new signing secret. The plaintext secret is returned once
    * alongside the persisted endpoint; it is never stored in plaintext.
    */
-  @Transactional
   public CreatedEndpointResult createEndpoint(UUID projectId, String url, String description) {
     ssrfUrlValidator.validate(url);
+    return transactions.execute(status -> createValidatedEndpoint(projectId, url, description));
+  }
+
+  private CreatedEndpointResult createValidatedEndpoint(
+      UUID projectId, String url, String description) {
 
     List<WebhookEndpoint> existing = endpointRepository.findByProject(projectId);
     if (existing.stream().anyMatch(e -> e.url().equalsIgnoreCase(url))) {
@@ -103,14 +110,20 @@ public class EndpointService {
         .orElseThrow(() -> new EndpointNotFoundException("Endpoint not found: " + id));
   }
 
-  @Transactional
   public WebhookEndpoint updateEndpoint(
+      UUID id, UUID projectId, String url, String description, Boolean enabled) {
+    getEndpoint(id, projectId);
+    if (url != null) ssrfUrlValidator.validate(url);
+    return transactions.execute(
+        status -> updateValidatedEndpoint(id, projectId, url, description, enabled));
+  }
+
+  private WebhookEndpoint updateValidatedEndpoint(
       UUID id, UUID projectId, String url, String description, Boolean enabled) {
     WebhookEndpoint existing = getEndpoint(id, projectId);
 
     String resolvedUrl = url != null ? url : existing.url();
     if (!resolvedUrl.equals(existing.url())) {
-      ssrfUrlValidator.validate(resolvedUrl);
 
       List<WebhookEndpoint> existingEndpoints = endpointRepository.findByProject(projectId);
       if (existingEndpoints.stream()

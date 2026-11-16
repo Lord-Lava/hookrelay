@@ -12,7 +12,7 @@ class DefaultSsrfUrlValidatorTest {
   void acceptsPublicHttpsUrl() {
     validator.validate("https://93.184.216.34/webhook");
     validator.validate("https://93.184.216.34:443/webhook");
-    validator.validate("https://93.184.216.34:443/path?query=1#fragment");
+    validator.validate("https://93.184.216.34:443/path?query=1");
   }
 
   @Test
@@ -219,15 +219,20 @@ class DefaultSsrfUrlValidatorTest {
   @Test
   void rejectsUnresolvableHostname() {
     // DNS failure must fail closed (no pass-through)
-    assertThatThrownBy(
-            () -> validator.validate("https://this-host-does-not-exist-12345.invalid/webhook"))
+    assertThatThrownBy(() ->
+            new DefaultSsrfUrlValidator(
+                    host -> {
+                      throw new java.net.UnknownHostException();
+                    })
+                .validate("https://this-host-does-not-exist-12345.invalid/webhook"))
         .isInstanceOf(SsrfValidationException.class)
-        .hasMessageContaining("Unable to resolve hostname");
+        .hasMessageContaining("Unable to resolve endpoint hostname");
   }
 
   @Test
-  void acceptsDocumentationRangeIpv6() {
-    // 2001:db8::/32 is documentation range, not a special-use address
-    validator.validate("https://[2001:db8::1]/webhook");
+  void rejectsDocumentationRangeIpv6() {
+    // Documentation addresses are not public delivery destinations.
+    assertThatThrownBy(() -> validator.validate("https://[2001:db8::1]/webhook"))
+        .isInstanceOf(SsrfValidationException.class);
   }
 }
