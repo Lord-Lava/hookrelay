@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
-  title: HookRelay Ingestion API
+  title: HookRelay API
   version: 0.1.0
-  description: Initial project-scoped event ingestion endpoint.
+  description: Project-scoped event ingestion and webhook endpoint management.
 servers:
   - url: http://localhost:8080
 paths:
@@ -52,9 +52,272 @@ paths:
         '400': { description: Invalid JSON or request fields }
         '401': { description: Missing or invalid project API key }
         '409': { description: Idempotency key reused with different content }
+
+  /v1/endpoints:
+    get:
+      summary: List the authenticated project's endpoints
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: A page of endpoints (signing secrets are not returned).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [content, total]
+                properties:
+                  content:
+                    type: array
+                    items: $ref: '#/components/schemas/WebhookEndpoint'
+                  total: { type: integer }
+        '401': { description: Missing or invalid project API key }
+        '429': { description: Project request limit exceeded }
+    post:
+      summary: Create a webhook endpoint and return its signing secret once
+      security:
+        - ProjectApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEndpointRequest'
+      responses:
+        '201':
+          description: Endpoint created; signingSecret is disclosed only once.
+          headers:
+            Cache-Control:
+              schema: { type: string, example: 'no-store' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedEndpointResult'
+        '400': { description: Invalid URL or request fields }
+        '401': { description: Missing or invalid project API key }
+        '409': { description: Endpoint URL already exists for this project }
+        '429': { description: Project request limit exceeded }
+        '503': { description: Signing service is not configured }
+
+  /v1/endpoints/{endpointId}:
+    get:
+      summary: Get a single endpoint owned by the authenticated project
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: endpointId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: $ref: '#/components/schemas/WebhookEndpoint'
+        '401': { description: Missing or invalid project API key }
+        '404': { description: Unknown endpoint or endpoint owned by another project }
+        '429': { description: Project request limit exceeded }
+    patch:
+      summary: Update an endpoint's URL, description, or enabled state
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: endpointId
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEndpointRequest'
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: $ref: '#/components/schemas/WebhookEndpoint'
+        '400': { description: Invalid URL or request fields }
+        '401': { description: Missing or invalid project API key }
+        '404': { description: Unknown endpoint or endpoint owned by another project }
+        '409': { description: Endpoint URL already exists for this project }
+        '429': { description: Project request limit exceeded }
+    delete:
+      summary: Soft-delete an endpoint owned by the authenticated project
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: endpointId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Endpoint soft-deleted }
+        '401': { description: Missing or invalid project API key }
+        '404': { description: Unknown endpoint or endpoint owned by another project }
+        '429': { description: Project request limit exceeded }
+
+  /v1/endpoints/{endpointId}/enable:
+    post:
+      summary: Enable delivery to an endpoint (requires a configured signing secret)
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: endpointId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Endpoint enabled }
+        '400': { description: Endpoint has no configured signing secret }
+        '401': { description: Missing or invalid project API key }
+        '404': { description: Unknown endpoint or endpoint owned by another project }
+        '429': { description: Project request limit exceeded }
+
+  /v1/endpoints/{endpointId}/disable:
+    post:
+      summary: Disable delivery to an endpoint
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: endpointId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Endpoint disabled }
+        '401': { description: Missing or invalid project API key }
+        '404': { description: Unknown endpoint or endpoint owned by another project }
+        '429': { description: Project request limit exceeded }
+
+  /v1/endpoints/{endpointId}/rotate-secret:
+    post:
+      summary: Rotate the endpoint's webhook signing secret (disclosed once)
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: endpointId
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Signing secret rotated; new value disclosed only once.
+          headers:
+            Cache-Control:
+              schema: { type: string, example: 'no-store' }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RotateSecretResult'
+        '401': { description: Missing or invalid project API key }
+        '404': { description: Unknown endpoint or endpoint owned by another project }
+        '429': { description: Project request limit exceeded }
+        '503': { description: Signing service is not configured }
+
+  /v1/endpoints/{endpointId}/subscriptions/{eventType}:
+    put:
+      summary: Subscribe an endpoint to an event type (idempotent)
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: endpointId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: eventType
+          required: true
+          schema: { type: string, pattern: '^[a-z0-9]+([._-][a-z0-9]+)*$' }
+      responses:
+        '201':
+          description: Subscription created.
+          content:
+            application/json:
+              schema: $ref: '#/components/schemas/EndpointSubscription'
+        '200':
+          description: Subscription already exists; returned without duplication.
+          content:
+            application/json:
+              schema: $ref: '#/components/schemas/EndpointSubscription'
+        '401': { description: Missing or invalid project API key }
+        '404': { description: Unknown endpoint or endpoint owned by another project }
+        '429': { description: Project request limit exceeded }
+    delete:
+      summary: Remove an endpoint's subscription to an event type
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: endpointId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: path
+          name: eventType
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Subscription removed }
+        '401': { description: Missing or invalid project API key }
+        '404': { description: Unknown endpoint, subscription, or wrong project }
+        '429': { description: Project request limit exceeded }
+
 components:
   securitySchemes:
     ProjectApiKey:
       type: apiKey
       in: header
       name: X-Api-Key
+  schemas:
+    WebhookEndpoint:
+      type: object
+      required: [id, projectId, url, enabled]
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        url: { type: string, format: uri, example: 'https://8.8.8.8/hook' }
+        description: { type: string, nullable: true }
+        enabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time, nullable: true }
+        deletedAt: { type: string, format: date-time, nullable: true, readOnly: true }
+    CreateEndpointRequest:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri, example: 'https://8.8.8.8/hook' }
+        description: { type: string, nullable: true }
+    CreatedEndpointResult:
+      type: object
+      required: [endpoint, signingSecret]
+      properties:
+        endpoint: $ref: '#/components/schemas/WebhookEndpoint'
+        signingSecret: { type: string, example: 'whsec_live_...', description: 'Disclosed once; never returned again.' }
+    RotateSecretResult:
+      type: object
+      required: [endpoint, signingSecret]
+      properties:
+        endpoint: $ref: '#/components/schemas/WebhookEndpoint'
+        signingSecret: { type: string, example: 'whsec_live_...', description: 'New signing secret, disclosed once.' }
+    UpdateEndpointRequest:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+        description: { type: string, nullable: true }
+        enabled: { type: boolean }
+    EndpointSubscription:
+      type: object
+      required: [id, endpointId, eventType]
+      properties:
+        id: { type: string, format: uuid }
+        endpointId: { type: string, format: uuid }
+        eventType: { type: string }
+        createdAt: { type: string, format: date-time }
+        deletedAt: { type: string, format: date-time, nullable: true, readOnly: true }

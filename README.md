@@ -23,14 +23,16 @@ The backend dependencies managed by Spring Boot use its 4.1.2 BOM. It currently 
 - RabbitMQ 4.4.0 with durable exchange, ingestion queue, and broker-level dead-letter queue
 - Project-scoped API key authentication (`X-Api-Key`)
 - `POST /v1/events` with payload validation and idempotency
+- Endpoint management: create/list/get/update/enable/disable, event-type subscriptions, and one-time signing-secret creation/rotation (`POST /v1/endpoints`, `GET /v1/endpoints`, `GET|PATCH|DELETE /v1/endpoints/{id}`, `POST /v1/endpoints/{id}/{enable|disable|rotate-secret}`, `PUT|DELETE /v1/endpoints/{id}/subscriptions/{eventType}`)
 - Transactional outbox with PostgreSQL row locking, one-at-a-time leases, persistent JSON AMQP messages, publisher confirms, and retry scheduling
+- HTTP admission controls: project rate limiting, streaming request-body caps, 8 KiB header cap, and Cache-Control/no-store on secret-bearing responses
 - Local-only seed organization, project, and API key; the secret is not printed to logs
-- Actuator health and metrics endpoints
-- Spotless Java formatting, legacy-import guard, OWASP Dependency-Check, Gradle dependency locking, and CycloneDX SBOM generation tasks
+- Actuator health endpoint (metrics/info/Prometheus not exposed on the public listener)
+- Spotless Java formatting, legacy-import guard, OWASP Dependency-Check, Gradle dependency locking, dependency verification metadata, and CycloneDX SBOM generation
 
 Pinned Gradle plugin versions live in `backend/gradle/libs.versions.toml`; Spring runtime libraries are governed by the Spring Boot 4.1.2 BOM.
 
-The actual outbound HTTP delivery worker, endpoint CRUD, customer dashboard, billing, and customer-visible delivery DLQ are deliberately not implemented yet. The RabbitMQ dead-letter queue in this starter protects broker-consumer failures; it is not a substitute for the persistent delivery-failure/DLQ domain model.
+The actual outbound HTTP delivery worker, customer dashboard, billing, and customer-visible delivery DLQ are deliberately not implemented yet. The RabbitMQ dead-letter queue in this starter protects broker-consumer failures; it is not a substitute for the persistent delivery-failure/DLQ domain model.
 
 ## Prerequisites
 
@@ -80,6 +82,8 @@ Inspect and review generated lock and verification metadata before committing. D
 
 ```bash
 cp .env.example .env
+# Generate a signing encryption key and set it (required for endpoint creation):
+#   openssl rand -base64 32   -> put the result in .env as SIGNING_ENCRYPTION_KEY
 # Change passwords and the local API key before exposing any ports beyond your machine.
 docker compose up --build
 ```
@@ -201,6 +205,24 @@ Response (`202 Accepted`):
 
 Missing, malformed, revoked, or unknown API keys return `401 Unauthorized`. Each request is scoped to the project associated with its key. There is no client-supplied tenant/project ID.
 
+## Endpoint management
+
+Endpoints are destination webhook URLs owned by the authenticated project. All writes are serialized per project and require HTTPS on port 443 without credentials or fragments; hostnames are resolved and every DNS answer must be a public non-reserved address (registration-time SSRF policy).
+
+- `POST /v1/endpoints` — `{"url":"https://8.8.8.8/hook","description":"..."}`. Creates an endpoint and returns a fresh `signingSecret` once (`Cache-Control: no-store`). Requires `SIGNING_ENCRYPTION_KEY`; returns 503 when signing is unconfigured.
+- `GET /v1/endpoints` — paginated list of the project's endpoints (bounded page size).
+- `GET|PATCH|DELETE /v1/endpoints/{id}` — tenant-scoped; returns 404 for unknown or other-project endpoints (never leaks existence).
+- `POST /v1/endpoints/{id}/enable|disable` — toggles delivery; requires a configured signing secret.
+- `POST /v1/endpoints/{id}/rotate-secret` — immediately replaces the webhook signing secret, returns it once, and appends an immutable `SECRET_ROTATED` audit row. Prior ciphertext remains decryptable via the retained key version.
+- `PUT|DELETE /v1/endpoints/{id}/subscriptions/{eventType}` — subscribe/unsubscribe the endpoint to an event type; concurrent identical creates collapse to one subscription.
+
+Concurrent requests sharing an idempotency key or subscription are resolved to a single durable record at the database level.
+
+## Signing configuration
+
+Endpoint signing secrets are encrypted at rest with AES-256-GCM. Provide `SIGNING_ENCRYPTION_KEY` (a base64-encoded 32-byte key, e.g. `openssl rand -base64 32`) and `SIGNING_KEY_VERSION` through external configuration; there is no default or hardcoded key. Without it, endpoint creation returns 503. Retain prior key versions under `hookrelay.signing.decryption-keys.<version>` so existing ciphertext stays decryptable; never commit keys to version control.
+
+
 ## Architecture notes
 
 ### Ingestion and transactional outbox
@@ -238,11 +260,13 @@ hookrelay/
 │   ├── generate-wrapper.sh / generate-wrapper.ps1
 │   └── src/
 │       ├── main/java/com/hookrelay/
-│       │   ├── auth/          # API-key auth + tenant context
-│       │   ├── common/        # API errors and request constraints
-│       │   ├── config/        # RabbitMQ + app configuration
-│       │   ├── event/         # event API and ingestion use case
-│       │   └── outbox/        # asynchronous broker publisher
+│       │       ├── auth/          # API-key auth + tenant context + rate limiting
+│       │       ├── common/        # API errors and request constraints
+│       │       ├── config/        # RabbitMQ + app + filter configuration
+│       │       ├── endpoint/      # destination CRUD, subscriptions, signing secrets
+│       │       ├── event/         # event API and ingestion use case
+│       │       ├── outbox/        # asynchronous broker publisher
+│       │       └── security/      # signing encryption and SSRF URL validation
 │       ├── main/resources/
 │       │   ├── db/migration/  # Flyway schema
 │       │   ├── application.yml
