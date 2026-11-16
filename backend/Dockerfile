@@ -6,12 +6,14 @@ USER gradle:gradle
 
 COPY --chown=gradle:gradle gradlew ./gradlew
 COPY --chown=gradle:gradle gradle ./gradle
-COPY --chown=gradle:gradle settings.gradle.kts build.gradle.kts gradle.properties ./
-RUN ./gradlew --no-daemon --version | grep -F "Gradle 9.9.1"
+COPY --chown=gradle:gradle settings.gradle.kts build.gradle.kts gradle.properties gradle.lockfile settings-gradle.lockfile buildscript-gradle.lockfile ./
+RUN ./gradlew --no-daemon --version
 RUN ./gradlew --no-daemon dependencies
 
 COPY --chown=gradle:gradle src ./src
-RUN ./gradlew --no-daemon clean check bootJar
+# CI runs clean check with access to Docker before building this image.
+# Packaging does not require a privileged Docker socket inside the builder.
+RUN ./gradlew --no-daemon bootJar
 
 # Minimal pinned Temurin JRE runtime; no compiler or Gradle in the final image.
 FROM eclipse-temurin:25.0.5_8-jre-noble

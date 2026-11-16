@@ -1,3 +1,9 @@
+buildscript {
+    configurations.classpath {
+        resolutionStrategy.activateDependencyLocking()
+    }
+}
+
 plugins {
     java
     alias(libs.plugins.spring.boot)
@@ -32,9 +38,9 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.testcontainers:junit-jupiter:${libs.versions.testcontainers.get()}")
-    testImplementation("org.testcontainers:postgresql:${libs.versions.testcontainers.get()}")
-    testImplementation("org.testcontainers:rabbitmq:${libs.versions.testcontainers.get()}")
+    testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+    testImplementation("org.testcontainers:testcontainers-postgresql")
+    testImplementation("org.testcontainers:testcontainers-rabbitmq")
 }
 
 // Reproducible dependency selection. Commit generated lock state after a trusted first resolution.
@@ -52,7 +58,7 @@ configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     // High/Critical findings fail the audit; suppressions require a reviewed, expiring exception.
     failBuildOnCVSS = 7.0F
     // The key is supplied by the CI secret store/environment, never committed to the repository.
-    providers.environmentVariable("NVD_API_KEY").orNull?.let { apiKey ->
+    providers.environmentVariable("NVD_API_KEY").orNull?.takeIf { it.isNotBlank() }?.let { apiKey ->
         nvd.apiKey.set(apiKey)
     }
 }

@@ -7,14 +7,13 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 
 @Testcontainers
 class SchemaUpgradeIntegrationTest {
-  @Container
-  static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18.7-alpine");
+  @Container static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:18.7-alpine");
 
   @Test
   void upgradesV4WithoutLosingAuditHistoryOrEnablingUnsignedEndpoints() {

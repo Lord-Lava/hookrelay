@@ -24,16 +24,15 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.context.WebApplicationContext;
-import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.MOCK)
 @Testcontainers
 class HttpSecurityIntegrationTest {
-  @Container
-  static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18.7-alpine");
+  @Container static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:18.7-alpine");
 
   private static final String KEY_A = "hr_live_testaaa_abcdefghijklmnopqrstuvwx";
   private static final String KEY_B = "hr_live_testbbb_abcdefghijklmnopqrstuvwx";
