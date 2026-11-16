@@ -2,7 +2,15 @@ openapi: 3.1.0
 info:
   title: HookRelay API
   version: 0.1.0
-  description: Project-scoped event ingestion and webhook endpoint management.
+  description: |
+    Project-scoped event ingestion and webhook endpoint management. All /v1 requests
+    require X-Api-Key. The default body cap is 270336 bytes (264 KiB), enforced while
+    reading even without Content-Length; event data is separately limited to 262144
+    serialized UTF-8 bytes. Request headers are capped at 8 KiB. Authenticated requests
+    share a project quota (default 1000 per 60 seconds); 429 includes Retry-After.
+    Acceptance is durable and asynchronous, with at-least-once publishing. Idempotency
+    keys are project-scoped; identical logical requests replay the original event and
+    conflicting reuse returns 409. Limits can be changed by deployment configuration.
 servers:
   - url: http://localhost:8080
 paths:
@@ -50,8 +58,14 @@ paths:
                   createdAt: { type: string, format: date-time }
                   status: { type: string, const: ACCEPTED }
         '400': { description: Invalid JSON or request fields }
-        '401': { description: Missing or invalid project API key }
+        '415': { description: Unsupported content type; use application/json }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '409': { description: Idempotency key reused with different content }
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
   /v1/endpoints:
     get:
@@ -72,14 +86,21 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [content, total]
+                required: [endpoints, page, size, total]
                 properties:
-                  content:
+                  endpoints:
                     type: array
-                    items: $ref: '#/components/schemas/WebhookEndpoint'
-                  total: { type: integer }
-        '401': { description: Missing or invalid project API key }
-        '429': { description: Project request limit exceeded }
+                    items:
+                      $ref: '#/components/schemas/WebhookEndpoint'
+                  page: { type: integer, minimum: 0 }
+                  size: { type: integer, minimum: 1, maximum: 100 }
+                  total: { type: integer, minimum: 0 }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
     post:
       summary: Create a webhook endpoint and return its signing secret once
       security:
@@ -101,9 +122,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/CreatedEndpointResult'
         '400': { description: Invalid URL or request fields }
-        '401': { description: Missing or invalid project API key }
+        '415': { description: Unsupported content type; use application/json }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '409': { description: Endpoint URL already exists for this project }
-        '429': { description: Project request limit exceeded }
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '503': { description: Signing service is not configured }
 
   /v1/endpoints/{endpointId}:
@@ -118,12 +144,18 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200':
+          description: Endpoint details without signing secrets.
           content:
             application/json:
-              schema: $ref: '#/components/schemas/WebhookEndpoint'
-        '401': { description: Missing or invalid project API key }
+              schema:
+                $ref: '#/components/schemas/WebhookEndpoint'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '404': { description: Unknown endpoint or endpoint owned by another project }
-        '429': { description: Project request limit exceeded }
+        '429':
+          $ref: '#/components/responses/RateLimited'
     patch:
       summary: Update an endpoint's URL, description, or enabled state
       security:
@@ -141,14 +173,21 @@ paths:
               $ref: '#/components/schemas/UpdateEndpointRequest'
       responses:
         '200':
+          description: Endpoint details without signing secrets.
           content:
             application/json:
-              schema: $ref: '#/components/schemas/WebhookEndpoint'
+              schema:
+                $ref: '#/components/schemas/WebhookEndpoint'
         '400': { description: Invalid URL or request fields }
-        '401': { description: Missing or invalid project API key }
+        '415': { description: Unsupported content type; use application/json }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '404': { description: Unknown endpoint or endpoint owned by another project }
         '409': { description: Endpoint URL already exists for this project }
-        '429': { description: Project request limit exceeded }
+        '429':
+          $ref: '#/components/responses/RateLimited'
     delete:
       summary: Soft-delete an endpoint owned by the authenticated project
       security:
@@ -160,9 +199,13 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '204': { description: Endpoint soft-deleted }
-        '401': { description: Missing or invalid project API key }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '404': { description: Unknown endpoint or endpoint owned by another project }
-        '429': { description: Project request limit exceeded }
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
   /v1/endpoints/{endpointId}/enable:
     post:
@@ -177,9 +220,13 @@ paths:
       responses:
         '200': { description: Endpoint enabled }
         '400': { description: Endpoint has no configured signing secret }
-        '401': { description: Missing or invalid project API key }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '404': { description: Unknown endpoint or endpoint owned by another project }
-        '429': { description: Project request limit exceeded }
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
   /v1/endpoints/{endpointId}/disable:
     post:
@@ -193,9 +240,13 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200': { description: Endpoint disabled }
-        '401': { description: Missing or invalid project API key }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '404': { description: Unknown endpoint or endpoint owned by another project }
-        '429': { description: Project request limit exceeded }
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
   /v1/endpoints/{endpointId}/rotate-secret:
     post:
@@ -217,9 +268,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RotateSecretResult'
-        '401': { description: Missing or invalid project API key }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '404': { description: Unknown endpoint or endpoint owned by another project }
-        '429': { description: Project request limit exceeded }
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '503': { description: Signing service is not configured }
 
   /v1/endpoints/{endpointId}/subscriptions/{eventType}:
@@ -235,21 +290,27 @@ paths:
         - in: path
           name: eventType
           required: true
-          schema: { type: string, pattern: '^[a-z0-9]+([._-][a-z0-9]+)*$' }
+          schema: { type: string, maxLength: 128, pattern: '^[a-z0-9]+([._-][a-z0-9]+)*$' }
       responses:
         '201':
           description: Subscription created.
           content:
             application/json:
-              schema: $ref: '#/components/schemas/EndpointSubscription'
+              schema:
+                $ref: '#/components/schemas/EndpointSubscription'
         '200':
           description: Subscription already exists; returned without duplication.
           content:
             application/json:
-              schema: $ref: '#/components/schemas/EndpointSubscription'
-        '401': { description: Missing or invalid project API key }
+              schema:
+                $ref: '#/components/schemas/EndpointSubscription'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '404': { description: Unknown endpoint or endpoint owned by another project }
-        '429': { description: Project request limit exceeded }
+        '429':
+          $ref: '#/components/responses/RateLimited'
     delete:
       summary: Remove an endpoint's subscription to an event type
       security:
@@ -265,9 +326,45 @@ paths:
           schema: { type: string }
       responses:
         '204': { description: Subscription removed }
-        '401': { description: Missing or invalid project API key }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
         '404': { description: Unknown endpoint, subscription, or wrong project }
-        '429': { description: Project request limit exceeded }
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /v1/endpoints/{endpointId}/subscriptions:
+    get:
+      summary: List active subscriptions for an endpoint owned by this project
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: endpointId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: A page of active subscriptions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionListResponse'
+        '400': { description: Invalid pagination or endpoint ID }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404': { description: Unknown endpoint or wrong project }
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
 
 components:
   securitySchemes:
@@ -275,33 +372,77 @@ components:
       type: apiKey
       in: header
       name: X-Api-Key
+  responses:
+    Unauthorized:
+      description: Missing, malformed, unknown or revoked project API key.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    PayloadTooLarge:
+      description: Request body or serialized event data exceeds its configured byte limit.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    RateLimited:
+      description: Project request quota exceeded.
+      headers:
+        Retry-After:
+          required: true
+          schema: { type: integer, minimum: 1, description: Seconds until retry }
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
   schemas:
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        timestamp: { type: string, format: date-time }
+        instance: { type: string }
+        errors: { type: object, additionalProperties: { type: string } }
+    SubscriptionListResponse:
+      type: object
+      required: [subscriptions, page, size, total]
+      properties:
+        subscriptions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EndpointSubscription'
+        page: { type: integer, minimum: 0 }
+        size: { type: integer, minimum: 1, maximum: 100 }
+        total: { type: integer, minimum: 0 }
     WebhookEndpoint:
       type: object
-      required: [id, projectId, url, enabled]
+      required: [id, projectId, url, enabled, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         projectId: { type: string, format: uuid }
-        url: { type: string, format: uri, example: 'https://8.8.8.8/hook' }
-        description: { type: string, nullable: true }
+        url: { type: string, format: uri, maxLength: 2048, example: 'https://8.8.8.8/hook' }
+        description: { type: [string, 'null'], maxLength: 160 }
         enabled: { type: boolean }
         createdAt: { type: string, format: date-time }
-        updatedAt: { type: string, format: date-time, nullable: true }
-        deletedAt: { type: string, format: date-time, nullable: true, readOnly: true }
+        updatedAt: { type: [string, 'null'], format: date-time }
     CreateEndpointRequest:
       type: object
       required: [url]
       properties:
-        url: { type: string, format: uri, example: 'https://8.8.8.8/hook' }
-        description: { type: string, nullable: true }
+        url: { type: string, format: uri, maxLength: 2048, example: 'https://8.8.8.8/hook' }
+        description: { type: [string, 'null'], maxLength: 160 }
     CreatedEndpointResult:
       type: object
       required: [id, projectId, url, signingSecret, enabled, createdAt, updatedAt]
       properties:
         id: { type: string, format: uuid }
         projectId: { type: string, format: uuid }
-        url: { type: string, format: uri, example: 'https://8.8.8.8/hook' }
-        description: { type: string, nullable: true }
+        url: { type: string, format: uri, maxLength: 2048, example: 'https://8.8.8.8/hook' }
+        description: { type: [string, 'null'], maxLength: 160 }
         signingSecret: { type: string, example: 'whsec_live_...', description: 'Signing secret, disclosed once.' }
         enabled: { type: boolean }
         createdAt: { type: string, format: date-time }
@@ -312,22 +453,22 @@ components:
       properties:
         id: { type: string, format: uuid }
         projectId: { type: string, format: uuid }
-        url: { type: string, format: uri, example: 'https://8.8.8.8/hook' }
+        url: { type: string, format: uri, maxLength: 2048, example: 'https://8.8.8.8/hook' }
         signingSecret: { type: string, example: 'whsec_live_...', description: 'New signing secret, disclosed once.' }
         enabled: { type: boolean }
         updatedAt: { type: string, format: date-time }
     UpdateEndpointRequest:
+      description: Omitted or null fields preserve their existing values.
       type: object
       properties:
-        url: { type: string, format: uri }
-        description: { type: string, nullable: true }
-        enabled: { type: boolean }
+        url: { type: [string, 'null'], format: uri, maxLength: 2048 }
+        description: { type: [string, 'null'], maxLength: 160 }
+        enabled: { type: [boolean, 'null'] }
     EndpointSubscription:
       type: object
-      required: [id, endpointId, eventType]
+      required: [id, endpointId, eventType, createdAt]
       properties:
         id: { type: string, format: uuid }
         endpointId: { type: string, format: uuid }
         eventType: { type: string }
         createdAt: { type: string, format: date-time }
-        deletedAt: { type: string, format: date-time, nullable: true, readOnly: true }

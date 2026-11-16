@@ -91,3 +91,11 @@ slow-client timeouts remain deployment controls for unauthenticated traffic.
 Only Actuator health is exposed over HTTP by default. Do not enable metrics/info/Prometheus on the
 public listener. A deployment that needs scraping must explicitly provision a private authenticated
 management listener or proxy. Project API keys are not management credentials.
+
+HTTP regression tests use a real embedded server and JDK HTTP client, including a
+non-root context path, chunked bodies, revoked keys and concurrent quota exhaustion.
+HookRelay's validation advice has order -1, ahead of Boot's default ProblemDetail
+advice (order 0), so invalid fields retain the documented `errors` object. See
+https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-rest-exceptions.html.
+OpenAPI contract tests parse the specification and compare controller operations,
+DTO fields, request length constraints and local schema references.

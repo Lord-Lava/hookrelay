@@ -71,6 +71,7 @@ tasks.withType<JavaCompile>().configureEach {
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    inputs.file(rootProject.file("../docs/openapi.yaml"))
     testLogging {
         events("failed", "skipped")
     }
