@@ -34,13 +34,15 @@ The collections cover only the HTTP endpoints that are actually implemented in t
 | `POST /v1/endpoints/{id}/enable` | POST | 200 | Yes (enable endpoint) |
 | `POST /v1/endpoints/{id}/disable` | POST | 200 | Yes (disable endpoint) |
 | `DELETE /v1/endpoints/{id}` | DELETE | 204 | Yes (soft delete endpoint) |
+| `POST /v1/endpoints/{id}/rotate-secret` | POST | 200 | Yes (rotate signing secret) |
+| `PUT /v1/endpoints/{id}/subscriptions/{eventType}` | PUT | 201/200 | Yes (create/idempotent subscription) |
+| `DELETE /v1/endpoints/{id}/subscriptions/{eventType}` | DELETE | 204 | Yes (delete subscription) |
+| `GET /v1/endpoints/{id}/subscriptions` | GET | 200 | Yes (list subscriptions) |
 
 **Not yet implemented (pending future work):**
-- Event-type subscriptions (`POST /v1/endpoints/{id}/subscriptions`)
 - Delivery history and DLQ
 - Event replay
 - API key management
-- Signing-secret management
 
 ## Authentication
 

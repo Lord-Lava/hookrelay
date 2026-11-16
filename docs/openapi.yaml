@@ -296,16 +296,26 @@ components:
         description: { type: string, nullable: true }
     CreatedEndpointResult:
       type: object
-      required: [endpoint, signingSecret]
+      required: [id, projectId, url, signingSecret, enabled, createdAt, updatedAt]
       properties:
-        endpoint: $ref: '#/components/schemas/WebhookEndpoint'
-        signingSecret: { type: string, example: 'whsec_live_...', description: 'Disclosed once; never returned again.' }
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        url: { type: string, format: uri, example: 'https://8.8.8.8/hook' }
+        description: { type: string, nullable: true }
+        signingSecret: { type: string, example: 'whsec_live_...', description: 'Signing secret, disclosed once.' }
+        enabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     RotateSecretResult:
       type: object
-      required: [endpoint, signingSecret]
+      required: [id, projectId, url, signingSecret, enabled, updatedAt]
       properties:
-        endpoint: $ref: '#/components/schemas/WebhookEndpoint'
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        url: { type: string, format: uri, example: 'https://8.8.8.8/hook' }
         signingSecret: { type: string, example: 'whsec_live_...', description: 'New signing secret, disclosed once.' }
+        enabled: { type: boolean }
+        updatedAt: { type: string, format: date-time }
     UpdateEndpointRequest:
       type: object
       properties:

@@ -1413,74 +1413,74 @@
             }
           ]
         },
-          {
-            "name": "POST /v1/endpoints - Create second endpoint for duplicate URL test",
-            "request": {
-              "method": "POST",
-              "header": [
-                {
-                  "key": "Content-Type",
-                  "value": "application/json"
-                },
-                {
-                  "key": "X-Api-Key",
-                  "value": "{{api_key}}"
-                }
-              ],
-              "body": {
-                "mode": "raw",
-                "raw": "{\n  \"url\": \"https://example.com/webhook2\",\n  \"description\": \"Second endpoint for duplicate URL test\"\n}"
-              },
-              "url": {
-                "raw": "{{base_url}}/v1/endpoints",
-                "host": [
-                  "{{base_url}}"
-                ],
-                "path": [
-                  "v1",
-                  "endpoints"
-                ]
-              },
-              "description": "Creates a second endpoint to enable duplicate URL conflict testing."
-            },
-            "response": [],
-            "event": [
+        {
+          "name": "POST /v1/endpoints - Create second endpoint for duplicate URL test",
+          "request": {
+            "method": "POST",
+            "header": [
               {
-                "listen": "test",
-                "script": {
-                  "type": "text/javascript",
-                  "exec": [
-                    "pm.test(\"Status code is 201 or 409\", function () {",
-                    "    pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
-                    "});",
-                    "",
-                    "if (pm.response.code === 201) {",
-                    "    var json = pm.response.json();",
-                    "    pm.expect(json).to.have.property(\"id\");",
-                    "    pm.environment.set(\"secondEndpointId\", json.id);",
-                    "    pm.environment.set(\"secondEndpointUrl\", json.url);",
-                    "} else if (pm.response.code === 409) {",
-                    "    pm.sendRequest({",
-                    "        url: pm.environment.get(\"base_url\") + \"/v1/endpoints?page=0&size=20\",",
-                    "        method: \"GET\",",
-                    "        header: { \"X-Api-Key\": pm.environment.get(\"api_key\") }",
-                    "    }, function (err, res) {",
-                    "        if (err) { console.log(err); return; }",
-                    "        var endpoints = res.json().endpoints;",
-                    "        var existing = endpoints.find(function (e) {",
-                    "            return e.url === \"https://example.com/webhook2\";",
-                    "        });",
-                    "        if (existing) {",
-                    "            pm.environment.set(\"secondEndpointId\", existing.id);",
-                    "            pm.environment.set(\"secondEndpointUrl\", existing.url);",
-                    "        }",
-                    "    });",
-                    "}"
-                  ]
-                }
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
               }
-            ]
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/webhook2\",\n  \"description\": \"Second endpoint for duplicate URL test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints"
+              ]
+            },
+            "description": "Creates a second endpoint to enable duplicate URL conflict testing."
           },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 or 409\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json).to.have.property(\"id\");",
+                  "    pm.environment.set(\"secondEndpointId\", json.id);",
+                  "    pm.environment.set(\"secondEndpointUrl\", json.url);",
+                  "} else if (pm.response.code === 409) {",
+                  "    pm.sendRequest({",
+                  "        url: pm.environment.get(\"base_url\") + \"/v1/endpoints?page=0&size=20\",",
+                  "        method: \"GET\",",
+                  "        header: { \"X-Api-Key\": pm.environment.get(\"api_key\") }",
+                  "    }, function (err, res) {",
+                  "        if (err) { console.log(err); return; }",
+                  "        var endpoints = res.json().endpoints;",
+                  "        var existing = endpoints.find(function (e) {",
+                  "            return e.url === \"https://example.com/webhook2\";",
+                  "        });",
+                  "        if (existing) {",
+                  "            pm.environment.set(\"secondEndpointId\", existing.id);",
+                  "            pm.environment.set(\"secondEndpointUrl\", existing.url);",
+                  "        }",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
         {
           "request": {
             "method": "PATCH",
@@ -1529,7 +1529,8 @@
                 ]
               }
             }
-          ]
+          ],
+          "name": "PATCH /v1/endpoints/{endpointId} - Update with duplicate URL rejected"
         },
         {
           "name": "PATCH /v1/endpoints/{endpointId} - Nonexistent endpoint",
