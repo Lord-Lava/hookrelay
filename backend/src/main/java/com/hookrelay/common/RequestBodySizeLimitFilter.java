@@ -22,7 +22,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import tools.jackson.databind.ObjectMapper;
 
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE)
+@Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class RequestBodySizeLimitFilter extends OncePerRequestFilter {
   private final ObjectMapper objectMapper;
   private final int maxRequestBytes;
@@ -31,13 +31,14 @@ public class RequestBodySizeLimitFilter extends OncePerRequestFilter {
       ObjectMapper objectMapper,
       @Value("${hookrelay.http.max-request-bytes:270336}") int maxRequestBytes) {
     this.objectMapper = objectMapper;
+    if (maxRequestBytes < 1 || maxRequestBytes > 1048576)
+      throw new IllegalArgumentException("Request limit must be 1-1048576 bytes");
     this.maxRequestBytes = maxRequestBytes;
   }
 
   @Override
   protected boolean shouldNotFilter(HttpServletRequest request) {
-    return !"POST".equalsIgnoreCase(request.getMethod())
-        || !"/v1/events".equals(request.getRequestURI());
+    return !request.getRequestURI().substring(request.getContextPath().length()).startsWith("/v1/");
   }
 
   @Override

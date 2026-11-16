@@ -76,3 +76,18 @@ Secret rotation immediately replaces the webhook secret. It writes a minimal imm
 historical rotation outbox rows into that table. Outbox rows are now constrained to EVENT_INGESTED.
 Previously published rotation messages may already be in a broker queue: drain/quarantine them
 before enabling a future ingestion consumer. A migration cannot retract an already published message.
+
+## ADR-011: HTTP limits and management exposure
+
+All `/v1/` requests authenticate and consume a project request allowance before their bodies are
+read. The streaming body cap applies to every API method, including unknown-length/chunked bodies;
+headers are capped at 8 KiB. The default allowance is 1,000 authenticated requests per 60-second
+window, configurable through PROJECT_REQUESTS_PER_WINDOW and PROJECT_REQUEST_WINDOW_SECONDS.
+A PostgreSQL row per project makes enforcement atomic across application instances. Rejected
+requests return 429 and Retry-After. This fixed-window policy may allow a burst across window
+boundaries; it is an admission limit, not a delivery concurrency limit. Edge/IP rate limits and
+slow-client timeouts remain deployment controls for unauthenticated traffic.
+
+Only Actuator health is exposed over HTTP by default. Do not enable metrics/info/Prometheus on the
+public listener. A deployment that needs scraping must explicitly provision a private authenticated
+management listener or proxy. Project API keys are not management credentials.

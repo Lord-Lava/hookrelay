@@ -70,7 +70,12 @@ public class ApiKeyAuthService {
     }
 
     // Do not execute a second statement while the key lookup ResultSet is open.
-    jdbcTemplate.update("UPDATE api_keys SET last_used_at = now() WHERE id = ?", record.id());
+    int updated =
+        jdbcTemplate.update(
+            "UPDATE api_keys SET last_used_at = now() WHERE id = ? AND project_id = ? AND revoked_at IS NULL",
+            record.id(),
+            record.identity().projectId());
+    if (updated == 0) return Optional.empty();
     return Optional.of(record.identity());
   }
 
