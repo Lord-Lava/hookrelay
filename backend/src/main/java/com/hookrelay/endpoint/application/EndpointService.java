@@ -3,9 +3,7 @@ package com.hookrelay.endpoint.application;
 import com.hookrelay.endpoint.domain.WebhookEndpoint;
 import com.hookrelay.endpoint.repository.WebhookEndpointRepository;
 import com.hookrelay.security.SigningSecretService;
-import java.net.InetAddress;
-import java.net.URI;
-import java.net.UnknownHostException;
+import com.hookrelay.security.ssrf.SsrfUrlValidator;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -22,16 +20,19 @@ public class EndpointService {
   private final SigningSecretService signingSecretService;
   private final JdbcTemplate jdbcTemplate;
   private final ObjectMapper objectMapper;
+  private final SsrfUrlValidator ssrfUrlValidator;
 
   public EndpointService(
       WebhookEndpointRepository endpointRepository,
       SigningSecretService signingSecretService,
       JdbcTemplate jdbcTemplate,
-      ObjectMapper objectMapper) {
+      ObjectMapper objectMapper,
+      SsrfUrlValidator ssrfUrlValidator) {
     this.endpointRepository = endpointRepository;
     this.signingSecretService = signingSecretService;
     this.jdbcTemplate = jdbcTemplate;
     this.objectMapper = objectMapper;
+    this.ssrfUrlValidator = ssrfUrlValidator;
   }
 
   /**
@@ -40,7 +41,7 @@ public class EndpointService {
    */
   @Transactional
   public CreatedEndpointResult createEndpoint(UUID projectId, String url, String description) {
-    validateUrlHost(url);
+    ssrfUrlValidator.validate(url);
 
     List<WebhookEndpoint> existing = endpointRepository.findByProject(projectId);
     if (existing.stream().anyMatch(e -> e.url().equalsIgnoreCase(url))) {
@@ -109,7 +110,7 @@ public class EndpointService {
 
     String resolvedUrl = url != null ? url : existing.url();
     if (!resolvedUrl.equals(existing.url())) {
-      validateUrlHost(resolvedUrl);
+      ssrfUrlValidator.validate(resolvedUrl);
 
       List<WebhookEndpoint> existingEndpoints = endpointRepository.findByProject(projectId);
       if (existingEndpoints.stream()
@@ -268,37 +269,6 @@ public class EndpointService {
           payload);
     } catch (Exception exception) {
       throw new IllegalStateException("Failed to record secret rotation audit event", exception);
-    }
-  }
-
-  private void validateUrlHost(String url) {
-    try {
-      URI uri = URI.create(url);
-      String host = uri.getHost();
-      if (host == null || host.isBlank()) {
-        return;
-      }
-
-      InetAddress[] addresses;
-      try {
-        addresses = InetAddress.getAllByName(host);
-      } catch (UnknownHostException e) {
-        return;
-      }
-
-      for (InetAddress address : addresses) {
-        if (address.isAnyLocalAddress()
-            || address.isLoopbackAddress()
-            || address.isLinkLocalAddress()
-            || address.isMulticastAddress()
-            || address.isSiteLocalAddress()) {
-          throw new IllegalArgumentException("URL host is not allowed: " + host);
-        }
-      }
-    } catch (IllegalArgumentException exception) {
-      throw exception;
-    } catch (Exception exception) {
-      // Malformed URL - scheme validation covers this; do not fail SSRF validation on parse errors.
     }
   }
 
