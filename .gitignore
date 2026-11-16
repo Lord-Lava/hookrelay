@@ -10,3 +10,8 @@ coverage/
 **/.gradle/
 **/build/
 *:Zone.Identifier
+
+# Python
+__pycache__/
+*.pyc
+.python-version
