@@ -89,7 +89,7 @@ class EndpointSubscriptionServiceIntegrationTest {
             projectId,
             "https://8.8.4.10/webhook",
             "Test",
-            "",
+            "synthetic-ciphertext",
             new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
             "v1",
             true,
@@ -104,7 +104,7 @@ class EndpointSubscriptionServiceIntegrationTest {
             otherProjectId,
             "https://8.8.8.50/webhook",
             "Other",
-            "",
+            "synthetic-ciphertext",
             new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
             "v1",
             true,
@@ -117,6 +117,7 @@ class EndpointSubscriptionServiceIntegrationTest {
   @AfterEach
   void cleanupDatabase() {
     jdbcTemplate.update("DELETE FROM endpoint_subscriptions");
+    jdbcTemplate.update("DELETE FROM endpoint_audit_events");
     jdbcTemplate.update("DELETE FROM endpoints");
     jdbcTemplate.update("DELETE FROM api_keys");
     jdbcTemplate.update("DELETE FROM projects");

@@ -56,3 +56,23 @@ preserving path/query case and escaped bytes. V5 normalizes existing URLs and re
 whole-URL case-insensitive index. Before a large deployment, inspect equivalent URLs and plan the
 migration's table/index locks; a normalization collision aborts migration without deleting data.
 Pagination uses 64-bit offsets and a UUID tie-breaker for equal creation timestamps.
+
+## ADR-010: Signing configuration and security audits
+
+Endpoint creation/rotation returns 503 when signing encryption is unavailable; ingestion remains
+available. No new unsigned endpoint is created. V6 disables legacy unsigned endpoints; rotate a
+secret before re-enabling them. Creation and rotation responses use `Cache-Control: no-store` and
+secret-bearing result records redact their `toString` output.
+
+The active encryption key/version are `hookrelay.signing.encryption-key` and `key-version`.
+Retain previous keys under `hookrelay.signing.decryption-keys.<version>` in external secret
+configuration (never Git). New writes use the active version, reads use the stored version.
+Do not remove an old key until its ciphertext has been re-encrypted or the corresponding secrets
+have been rotated, including backups. KMS/envelope encryption is still a production deployment
+requirement; this implementation is a locally configured keyring, not KMS.
+
+Secret rotation immediately replaces the webhook secret. It writes a minimal immutable
+`endpoint_audit_events` row in the same transaction; no secret values are recorded. V6 moves
+historical rotation outbox rows into that table. Outbox rows are now constrained to EVENT_INGESTED.
+Previously published rotation messages may already be in a broker queue: drain/quarantine them
+before enabling a future ingestion consumer. A migration cannot retract an already published message.

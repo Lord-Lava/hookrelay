@@ -77,6 +77,13 @@ public class ApiExceptionHandler {
         .body(problem(HttpStatus.BAD_REQUEST, exception.getMessage()));
   }
 
+  @ExceptionHandler(com.hookrelay.security.SigningUnavailableException.class)
+  public ResponseEntity<ProblemDetail> handleSigningUnavailable() {
+    return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+        .body(
+            problem(HttpStatus.SERVICE_UNAVAILABLE, "Signing service is temporarily unavailable"));
+  }
+
   private ProblemDetail problem(HttpStatus status, String detail) {
     ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, detail);
     problem.setType(URI.create("about:blank"));

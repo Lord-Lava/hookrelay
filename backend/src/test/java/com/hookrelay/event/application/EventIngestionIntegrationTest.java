@@ -104,6 +104,7 @@ class EventIngestionIntegrationTest {
     jdbcTemplate.update("DELETE FROM outbox_messages");
     jdbcTemplate.update("DELETE FROM events");
     jdbcTemplate.update("DELETE FROM endpoint_subscriptions");
+    jdbcTemplate.update("DELETE FROM endpoint_audit_events");
     jdbcTemplate.update("DELETE FROM endpoints");
     jdbcTemplate.update("DELETE FROM api_keys");
     jdbcTemplate.update("DELETE FROM projects");
@@ -154,17 +155,11 @@ class EventIngestionIntegrationTest {
     }
 
     @Test
-    void rejectsRevokedApiKey() throws Exception {
-      // Revoked keys are handled at the filter layer; here we verify the service
-      // still processes events for valid keys. Revocation is tested in auth unit tests.
-      // This test documents that the service layer doesn't handle revocation.
-      CreateEventRequest request =
-          buildRequest("payment.succeeded", new PaymentPayload("pay_123", 4999));
-
-      EventIngestionService.AcceptedEvent accepted =
-          eventIngestionService.accept(projectId, request, "idem-002");
-
-      assertThat(accepted.eventId()).isNotNull();
+    void rejectsRevokedApiKey() {
+      ApiKeyAuthService auth = new ApiKeyAuthService(jdbcTemplate);
+      assertThat(auth.authenticate(TEST_API_KEY)).isPresent();
+      jdbcTemplate.update("UPDATE api_keys SET revoked_at = now() WHERE project_id = ?", projectId);
+      assertThat(auth.authenticate(TEST_API_KEY)).isEmpty();
     }
   }
 
@@ -260,6 +255,36 @@ class EventIngestionIntegrationTest {
               otherProjectId,
               "idem-006");
       assertThat(projectBCount).isEqualTo(1);
+    }
+  }
+
+  @Test
+  void concurrentIdenticalRequestsCreateOneEventAndOutbox() throws Exception {
+    var request = buildRequest("payment.succeeded", new PaymentPayload("race", 1));
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+      var futures =
+          new java.util.ArrayList<
+              java.util.concurrent.Future<EventIngestionService.AcceptedEvent>>();
+      for (int i = 0; i < 8; i++) {
+        futures.add(
+            executor.submit(() -> {
+              start.await();
+              return eventIngestionService.accept(projectId, request, "race");
+            }));
+      }
+      start.countDown();
+      var results = new java.util.ArrayList<EventIngestionService.AcceptedEvent>();
+      for (var future : futures) results.add(future.get(15, java.util.concurrent.TimeUnit.SECONDS));
+      assertThat(results.stream().map(EventIngestionService.AcceptedEvent::eventId).distinct())
+          .hasSize(1);
+      assertThat(results.stream().filter(r -> !r.replayed())).hasSize(1);
+      assertThat(
+              jdbcTemplate.queryForObject(
+                  "SELECT COUNT(*) FROM outbox_messages WHERE project_id = ?",
+                  Integer.class,
+                  projectId))
+          .isEqualTo(1);
     }
   }
 

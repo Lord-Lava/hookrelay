@@ -33,7 +33,9 @@ public class EndpointController {
     UUID projectId = TenantContext.require().projectId();
     EndpointService.CreatedEndpointResult result =
         endpointService.createEndpoint(projectId, request.url(), request.description());
-    return ResponseEntity.status(201).body(toCreatedResponse(result));
+    return ResponseEntity.status(201)
+        .header("Cache-Control", "no-store")
+        .body(toCreatedResponse(result));
   }
 
   @GetMapping
@@ -96,14 +98,16 @@ public class EndpointController {
     EndpointService.RotateSecretResult result =
         endpointService.rotateSigningSecret(endpointId, projectId);
     WebhookEndpoint endpoint = result.endpoint();
-    return ResponseEntity.ok(
-        new RotateSecretResponse(
-            endpoint.id(),
-            endpoint.projectId(),
-            endpoint.url(),
-            result.signingSecret(),
-            endpoint.enabled(),
-            endpoint.updatedAt()));
+    return ResponseEntity.ok()
+        .header("Cache-Control", "no-store")
+        .body(
+            new RotateSecretResponse(
+                endpoint.id(),
+                endpoint.projectId(),
+                endpoint.url(),
+                result.signingSecret(),
+                endpoint.enabled(),
+                endpoint.updatedAt()));
   }
 
   private CreatedEndpointResponse toCreatedResponse(EndpointService.CreatedEndpointResult result) {

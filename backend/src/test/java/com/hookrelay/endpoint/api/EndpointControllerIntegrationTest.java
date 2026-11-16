@@ -100,6 +100,7 @@ class EndpointControllerIntegrationTest {
   void cleanupDatabase() {
     jdbcTemplate.update("DELETE FROM outbox_messages");
     jdbcTemplate.update("DELETE FROM endpoint_subscriptions");
+    jdbcTemplate.update("DELETE FROM endpoint_audit_events");
     jdbcTemplate.update("DELETE FROM endpoints");
     jdbcTemplate.update("DELETE FROM api_keys");
     jdbcTemplate.update("DELETE FROM projects");
@@ -427,18 +428,16 @@ class EndpointControllerIntegrationTest {
     var auditEvents =
         jdbcTemplate.queryForList(
             """
-            SELECT id, project_id, aggregate_id, message_type, payload
-            FROM outbox_messages
-            WHERE message_type = 'SECRET_ROTATED'
+            SELECT id, project_id, endpoint_id, action FROM endpoint_audit_events WHERE action = 'SECRET_ROTATED'
             """);
 
     assertThat(auditEvents).hasSize(1);
     var row = auditEvents.getFirst();
     assertThat(row.get("project_id")).isEqualTo(projectId);
-    assertThat(row.get("aggregate_id")).isEqualTo(createResult.endpoint().id());
-    assertThat(row.get("message_type")).isEqualTo("SECRET_ROTATED");
+    assertThat(row.get("endpoint_id")).isEqualTo(createResult.endpoint().id());
+    assertThat(row.get("action")).isEqualTo("SECRET_ROTATED");
     // Payload must not contain secret material
-    assertThat(row.get("payload").toString()).doesNotContain("whsec_");
+    assertThat(row.toString()).doesNotContain("whsec_");
   }
 
   @Test
@@ -462,11 +461,16 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void rotateSecretRequiresEncryptionConfigured() {
-    // This test verifies behavior when encryption is NOT configured by checking
-    // the service throws when isConfigured() returns false. Since the test
-    // environment has encryption configured, this test documents the expected
-    // behavior via the service layer guard.
-    assertThat(endpointService).isNotNull();
+    var unconfigured = new com.hookrelay.security.AesGcmSigningSecretService("", "v1");
+    unconfigured.afterPropertiesSet();
+    var service =
+        new EndpointService(
+            endpointRepository, unconfigured, jdbcTemplate, mapper, url -> {}, transactions);
+    assertThatThrownBy(() -> service.createEndpoint(projectId, "https://8.8.8.8/missing", null))
+        .isInstanceOf(com.hookrelay.security.SigningUnavailableException.class);
+    assertThat(endpointService.countEndpoints(projectId)).isZero();
+    assertThatThrownBy(() -> service.rotateSigningSecret(UUID.randomUUID(), projectId))
+        .isInstanceOf(com.hookrelay.security.SigningUnavailableException.class);
   }
 
   @Autowired private com.hookrelay.security.SigningSecretService secrets;
@@ -518,5 +522,33 @@ class EndpointControllerIntegrationTest {
   @Test
   void paginationDoesNotOverflow() {
     assertThat(endpointService.listEndpoints(projectId, Integer.MAX_VALUE, 100)).isEmpty();
+  }
+
+  @Test
+  void auditFailureRollsBackSecretRotation() {
+    var created = endpointService.createEndpoint(projectId, "https://8.8.8.8/rollback", null);
+    jdbcTemplate.execute(
+        "ALTER TABLE endpoint_audit_events ADD CONSTRAINT test_reject_audit CHECK (false) NOT VALID");
+    try {
+      assertThatThrownBy(
+              () -> endpointService.rotateSigningSecret(created.endpoint().id(), projectId))
+          .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+      assertThat(endpointService.getSigningSecret(created.endpoint().id(), projectId))
+          .isEqualTo(created.signingSecret());
+      assertThat(
+              jdbcTemplate.queryForObject(
+                  "SELECT COUNT(*) FROM endpoint_audit_events WHERE project_id = ?",
+                  Integer.class,
+                  projectId))
+          .isZero();
+      assertThat(
+              jdbcTemplate.queryForObject(
+                  "SELECT COUNT(*) FROM outbox_messages WHERE project_id = ?",
+                  Integer.class,
+                  projectId))
+          .isZero();
+    } finally {
+      jdbcTemplate.execute("ALTER TABLE endpoint_audit_events DROP CONSTRAINT test_reject_audit");
+    }
   }
 }

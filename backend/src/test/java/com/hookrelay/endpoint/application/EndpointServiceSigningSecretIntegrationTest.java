@@ -76,6 +76,7 @@ class EndpointServiceSigningSecretIntegrationTest {
 
   @AfterEach
   void cleanupDatabase() {
+    jdbcTemplate.update("DELETE FROM endpoint_audit_events");
     jdbcTemplate.update("DELETE FROM endpoints");
     jdbcTemplate.update("DELETE FROM api_keys");
     jdbcTemplate.update("DELETE FROM projects");

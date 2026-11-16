@@ -180,4 +180,20 @@ class AesGcmSigningSecretServiceTest {
     assertThatThrownBy(() -> service.decrypt("whsec_ciphertext", new byte[0], "v1"))
         .isInstanceOf(IllegalArgumentException.class);
   }
+
+  @Test
+  void decryptsOldKeyVersionDuringEncryptionKeyRotation() throws Exception {
+    var old = service.encrypt("whsec_retained");
+    String newKey = Base64.getEncoder().encodeToString(new byte[32]);
+    var rotated =
+        new AesGcmSigningSecretService(
+            new SigningProperties(newKey, "v2", java.util.Map.of("v1", TEST_KEY_BASE64)));
+    rotated.afterPropertiesSet();
+    assertThat(rotated.decrypt(old.ciphertext(), old.nonce(), old.keyVersion()))
+        .isEqualTo("whsec_retained");
+    var current = rotated.encrypt("whsec_current");
+    assertThat(current.keyVersion()).isEqualTo("v2");
+    assertThat(rotated.decrypt(current.ciphertext(), current.nonce(), current.keyVersion()))
+        .isEqualTo("whsec_current");
+  }
 }

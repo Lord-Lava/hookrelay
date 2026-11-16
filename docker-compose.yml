@@ -44,6 +44,8 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
+      SIGNING_ENCRYPTION_KEY: ${SIGNING_ENCRYPTION_KEY:?Set a base64-encoded 32-byte signing encryption key}
+      SIGNING_KEY_VERSION: ${SIGNING_KEY_VERSION:-v1}
       SPRING_PROFILES_ACTIVE: local
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-hookrelay}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-hookrelay}

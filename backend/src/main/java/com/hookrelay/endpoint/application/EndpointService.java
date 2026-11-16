@@ -4,7 +4,6 @@ import com.hookrelay.endpoint.domain.WebhookEndpoint;
 import com.hookrelay.endpoint.repository.WebhookEndpointRepository;
 import com.hookrelay.security.SigningSecretService;
 import com.hookrelay.security.ssrf.SsrfUrlValidator;
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -51,19 +50,8 @@ public class EndpointService {
   private CreatedEndpointResult createValidatedEndpoint(
       UUID projectId, String url, String description) {
 
-    if (!signingSecretService.isConfigured()) {
-      // No encryption key configured - store empty ciphertext sentinel (backward compatible)
-      // Do not expose this value through any API response.
-      WebhookEndpoint endpoint =
-          new WebhookEndpoint(
-              null, projectId, url, description, "", null, null, true, null, null, null);
-      try {
-        return new CreatedEndpointResult(endpointRepository.save(endpoint), null);
-      } catch (DataIntegrityViolationException exception) {
-        throw new EndpointAlreadyExistsException(
-            "Endpoint URL already exists for this project", exception);
-      }
-    }
+    if (!signingSecretService.isConfigured())
+      throw new com.hookrelay.security.SigningUnavailableException();
 
     String plaintextSecret = signingSecretService.generateSecret();
     SigningSecretService.EncryptedSecret encrypted = signingSecretService.encrypt(plaintextSecret);
@@ -120,6 +108,7 @@ public class EndpointService {
       UUID id, UUID projectId, String url, String description, Boolean enabled) {
     WebhookEndpoint existing = lockEndpoint(id, projectId);
 
+    if (Boolean.TRUE.equals(enabled)) requireSecret(existing);
     String resolvedUrl = url != null ? url : existing.url();
     WebhookEndpoint updated =
         new WebhookEndpoint(
@@ -151,6 +140,7 @@ public class EndpointService {
   @Transactional
   public void enableEndpoint(UUID id, UUID projectId) {
     WebhookEndpoint existing = lockEndpoint(id, projectId);
+    requireSecret(existing);
     if (existing.enabled()) {
       return;
     }
@@ -205,8 +195,8 @@ public class EndpointService {
    * signing; never exposed through API responses.
    */
   public String getSigningSecret(UUID id, UUID projectId) {
-    if (signingSecretService == null) {
-      throw new IllegalStateException("Signing secret encryption is not configured");
+    if (!signingSecretService.isConfigured()) {
+      throw new com.hookrelay.security.SigningUnavailableException();
     }
     WebhookEndpoint endpoint = getEndpoint(id, projectId);
     if (endpoint.signingSecretCiphertext() == null
@@ -227,7 +217,7 @@ public class EndpointService {
   @Transactional
   public RotateSecretResult rotateSigningSecret(UUID id, UUID projectId) {
     if (!signingSecretService.isConfigured()) {
-      throw new IllegalStateException("Signing secret encryption is not configured");
+      throw new com.hookrelay.security.SigningUnavailableException();
     }
 
     WebhookEndpoint existing = lockEndpoint(id, projectId);
@@ -245,31 +235,38 @@ public class EndpointService {
     return new RotateSecretResult(updated, plaintextSecret);
   }
 
+  private void requireSecret(WebhookEndpoint endpoint) {
+    if (endpoint.signingSecretCiphertext() == null
+        || endpoint.signingSecretCiphertext().isBlank()
+        || endpoint.nonce() == null
+        || endpoint.keyVersion() == null)
+      throw new IllegalArgumentException("Rotate the signing secret before enabling this endpoint");
+  }
+
   private void recordSecretRotationAudit(UUID projectId, UUID endpointId) {
-    try {
-      String payload =
-          objectMapper.writeValueAsString(
-              new SecretRotationAuditEvent(endpointId, "SECRET_ROTATED", Instant.now()));
-      jdbcTemplate.update(
-          """
-          INSERT INTO outbox_messages (id, project_id, aggregate_id, message_type, payload)
-          VALUES (?, ?, ?, 'SECRET_ROTATED', ?::jsonb)
-          """,
-          UUID.randomUUID(),
-          projectId,
-          endpointId,
-          payload);
-    } catch (Exception exception) {
-      throw new IllegalStateException("Failed to record secret rotation audit event", exception);
-    }
+    jdbcTemplate.update(
+        """
+        INSERT INTO endpoint_audit_events (id, project_id, endpoint_id, action)
+        VALUES (?, ?, ?, 'SECRET_ROTATED')
+        """,
+        UUID.randomUUID(),
+        projectId,
+        endpointId);
   }
 
   /** Holds the result of creating an endpoint, including the plaintext signing secret. */
-  public record CreatedEndpointResult(WebhookEndpoint endpoint, String signingSecret) {}
+  public record CreatedEndpointResult(WebhookEndpoint endpoint, String signingSecret) {
+    @Override
+    public String toString() {
+      return "CreatedEndpointResult[redacted]";
+    }
+  }
 
   /** Holds the result of rotating a signing secret, including the new plaintext secret. */
-  public record RotateSecretResult(WebhookEndpoint endpoint, String signingSecret) {}
-
-  /** Audit event payload for secret rotation - contains no secret material. */
-  private record SecretRotationAuditEvent(UUID endpointId, String eventType, Instant timestamp) {}
+  public record RotateSecretResult(WebhookEndpoint endpoint, String signingSecret) {
+    @Override
+    public String toString() {
+      return "RotateSecretResult[redacted]";
+    }
+  }
 }

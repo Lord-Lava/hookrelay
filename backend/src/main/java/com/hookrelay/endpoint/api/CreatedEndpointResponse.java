@@ -11,4 +11,9 @@ public record CreatedEndpointResponse(
     String signingSecret,
     boolean enabled,
     Instant createdAt,
-    Instant updatedAt) {}
+    Instant updatedAt) {
+  @Override
+  public String toString() {
+    return "CreatedEndpointResponse[redacted]";
+  }
+}

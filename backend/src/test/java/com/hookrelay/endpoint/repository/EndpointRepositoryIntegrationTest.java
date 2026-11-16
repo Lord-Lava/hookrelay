@@ -79,6 +79,7 @@ class EndpointRepositoryIntegrationTest {
   @AfterEach
   void cleanupDatabase() {
     jdbcTemplate.update("DELETE FROM endpoint_subscriptions");
+    jdbcTemplate.update("DELETE FROM endpoint_audit_events");
     jdbcTemplate.update("DELETE FROM endpoints");
     jdbcTemplate.update("DELETE FROM projects");
     jdbcTemplate.update("DELETE FROM organizations");

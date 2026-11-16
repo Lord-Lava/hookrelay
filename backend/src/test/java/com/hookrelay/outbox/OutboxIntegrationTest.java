@@ -90,6 +90,7 @@ class OutboxIntegrationTest {
     jdbcTemplate.update("DELETE FROM outbox_messages");
     jdbcTemplate.update("DELETE FROM events");
     jdbcTemplate.update("DELETE FROM endpoint_subscriptions");
+    jdbcTemplate.update("DELETE FROM endpoint_audit_events");
     jdbcTemplate.update("DELETE FROM endpoints");
     jdbcTemplate.update("DELETE FROM api_keys");
     jdbcTemplate.update("DELETE FROM projects");
@@ -136,7 +137,8 @@ class OutboxIntegrationTest {
             "SELECT status, last_error FROM outbox_messages WHERE id = ?",
             (rs, rowNum) -> new Object[] {rs.getString("status"), rs.getString("last_error")},
             outboxId);
-    if ("PUBLISHED".equals(row[0])) {
+    assertThat(row[0]).isEqualTo("PUBLISHED");
+    {
       assertThat(row[1]).isNull();
     }
     // If not PUBLISHED, confirm failed in test env but message was delivered
@@ -164,7 +166,8 @@ class OutboxIntegrationTest {
                 },
             outboxId);
 
-    if ("PUBLISHED".equals(row[0])) {
+    assertThat(row[0]).isEqualTo("PUBLISHED");
+    {
       assertThat(row[1]).isNotNull();
       assertThat(row[2]).isNull();
     }
