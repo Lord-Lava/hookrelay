@@ -146,6 +146,8 @@ class HttpSecurityIntegrationTest {
   @Test
   void isolatesAnExistingEndpointAcrossEveryOperation() throws Exception {
     String path = "/v1/endpoints/" + endpoint();
+    assertThat(request("PUT", path + "/subscriptions/test.event", KEY_A, "").statusCode())
+        .isEqualTo(201);
     for (var method : new String[] {"GET", "PATCH", "DELETE"}) {
       problem(request(method, path, KEY_B, "{}"), 404);
     }
@@ -161,6 +163,8 @@ class HttpSecurityIntegrationTest {
     var owned = request("GET", path, KEY_A, "");
     assertThat(owned.statusCode()).isEqualTo(200);
     assertThat(json(owned).get("enabled").asBoolean()).isTrue();
+    var subscriptions = request("GET", path + "/subscriptions", KEY_A, "");
+    assertThat(json(subscriptions).get("total").asInt()).isEqualTo(1);
     assertThat(owned.body()).doesNotContain("whsec_", "signingSecret", "ciphertext", "nonce");
     var rotated = request("POST", path + "/rotate-secret", KEY_A, "");
     assertThat(rotated.statusCode()).isEqualTo(200);

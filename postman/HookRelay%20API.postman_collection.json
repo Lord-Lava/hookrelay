@@ -1,2529 +1,1569 @@
 {
   "info": {
     "name": "HookRelay API",
-    "_postman_id": "hookrelay-api-collection",
-    "description": "Comprehensive API test collection for HookRelay webhook delivery platform. Covers event ingestion, endpoint management, health checks, authentication, authorization, tenant isolation, and edge cases. Requires a running HookRelay backend and valid API key configured in the environment.\n\nIMPORTANT: Replace PLACEHOLDER values in the environment file with real test credentials before running.",
-    "schema": "https://schema.postman.com/collection/json/v2.1.0/collection.json"
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Mutating tests for an isolated development environment; requires API keys for two different projects. Creates unique endpoints and deletes them on success. Events and audit history remain."
   },
-  "item": [
-    {
-      "name": "Health",
-      "item": [
-        {
-          "name": "GET /actuator/health - Application health check",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/actuator/health",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "actuator",
-                "health"
-              ]
-            },
-            "description": "Verifies the HookRelay application is running and healthy. No authentication required."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has status field\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"status\");",
-                  "});",
-                  "",
-                  "pm.test(\"Application status is UP\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(\"UP\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Event Ingestion",
-      "item": [
-        {
-          "name": "POST /v1/events - Successful event ingestion",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "evt-smoke-001"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": {\n    \"paymentId\": \"pay_123\",\n    \"amount\": 4999,\n    \"currency\": \"INR\"\n  }\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/events",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "events"
-              ]
-            },
-            "description": "Ingests a valid event with a unique idempotency key. Expects 202 Accepted."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 202\", function () {",
-                  "    pm.response.to.have.status(202);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has eventId\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"eventId\");",
-                  "    pm.expect(json.eventId).to.not.be.empty;",
-                  "    pm.environment.set(\"lastEventId\", json.eventId);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has createdAt\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"createdAt\");",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has status ACCEPTED\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(\"ACCEPTED\");",
-                  "});",
-                  "",
-                  "pm.test(\"Idempotent-Replayed header is boolean\", function () {",
-                  "    var replayed = pm.response.headers.get(\"Idempotent-Replayed\");",
-                  "    pm.expect(replayed).to.be.oneOf([\"true\", \"false\"]);",
-                  "});",
-                  "",
-                  "pm.test(\"Cache-Control header is no-store\", function () {",
-                  "    pm.expect(pm.response.headers.get(\"Cache-Control\")).to.equal(\"no-store\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/events - Idempotency replay (same key, same payload)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "evt-smoke-001"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": {\n    \"paymentId\": \"pay_123\",\n    \"amount\": 4999,\n    \"currency\": \"INR\"\n  }\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/events",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "events"
-              ]
-            },
-            "description": "Replays the same event with the same idempotency key. Expects 202 Accepted with Idempotent-Replayed: true and same eventId."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 202\", function () {",
-                  "    pm.response.to.have.status(202);",
-                  "});",
-                  "",
-                  "pm.test(\"Idempotent-Replayed header is true\", function () {",
-                  "    pm.expect(pm.response.headers.get(\"Idempotent-Replayed\")).to.equal(\"true\");",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has eventId matching original\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"eventId\");",
-                  "    pm.expect(json.eventId).to.equal(pm.environment.get(\"lastEventId\"));",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/events - Idempotency conflict (same key, different payload)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              },
-              {
-                "key": "Idempotency-Key",
-                "value": "evt-smoke-001"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"eventType\": \"refund.processed\",\n  \"data\": {\n    \"refundId\": \"ref_999\",\n    \"amount\": 9999\n  }\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/events",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "events"
-              ]
-            },
-            "description": "Reuses the same idempotency key with a different payload. Expects 409 Conflict."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 409\", function () {",
-                  "    pm.response.to.have.status(409);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"type\");",
-                  "    pm.expect(json).to.have.property(\"title\");",
-                  "    pm.expect(json).to.have.property(\"status\");",
-                  "    pm.expect(json.status).to.equal(409);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/events - Missing required fields (no body)",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/events",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "events"
-              ]
-            },
-            "description": "Sends an empty JSON object. Expects 400 Bad Request (missing eventType and data)."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"title\");",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "    pm.expect(json.title).to.equal(\"Bad Request\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/events - Invalid event type format",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"eventType\": \"INVALID_EVENT_TYPE!!\",\n  \"data\": {\n    \"key\": \"value\"\n  }\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/events",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "events"
-              ]
-            },
-            "description": "Sends an event with an invalid event type format (uppercase, special characters). Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/events - Data is not a JSON object",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": \"not-an-object\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/events",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "events"
-              ]
-            },
-            "description": "Sends an event where data is a string instead of a JSON object. Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/events - Missing authentication",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": {\n    \"paymentId\": \"pay_123\"\n  }\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/events",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "events"
-              ]
-            },
-            "description": "Sends an event without the X-Api-Key header. Expects 401 Unauthorized."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 401\", function () {",
-                  "    pm.response.to.have.status(401);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"type\");",
-                  "    pm.expect(json).to.have.property(\"title\");",
-                  "    pm.expect(json.status).to.equal(401);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/events - Invalid API key",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "invalid-api-key"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": {\n    \"paymentId\": \"pay_123\"\n  }\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/events",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "events"
-              ]
-            },
-            "description": "Sends an event with an invalid API key. Expects 401 Unauthorized."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 401\", function () {",
-                  "    pm.response.to.have.status(401);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(401);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Endpoint Management",
-      "item": [
-        {
-          "name": "POST /v1/endpoints - Create endpoint successfully",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://example.com/webhook\",\n  \"description\": \"Smoke test endpoint\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Creates a new webhook endpoint. Expects 201 Created."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 201 or 409\", function () {",
-                  "    pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
-                  "});",
-                  "",
-                  "var responseJson = pm.response.json();",
-                  "if (pm.response.code === 201) {",
-                  "    pm.expect(responseJson).to.have.property(\"id\");",
-                  "    pm.expect(responseJson.id).to.not.be.empty;",
-                  "    pm.environment.set(\"createdEndpointId\", responseJson.id);",
-                  "    pm.test(\"Response body has projectId\", function () {",
-                  "        pm.expect(responseJson).to.have.property(\"projectId\");",
-                  "    });",
-                  "    pm.test(\"Response body has url\", function () {",
-                  "        pm.expect(responseJson.url).to.equal(\"https://example.com/webhook\");",
-                  "    });",
-                  "    pm.test(\"Response body has description\", function () {",
-                  "        pm.expect(responseJson.description).to.equal(\"Smoke test endpoint\");",
-                  "    });",
-                  "    pm.test(\"Response body has enabled true\", function () {",
-                  "        pm.expect(responseJson.enabled).to.equal(true);",
-                  "    });",
-                  "    pm.test(\"Response body has signingSecret with whsec_ prefix\", function () {",
-                  "        pm.expect(responseJson).to.have.property(\"signingSecret\");",
-                  "        pm.expect(responseJson.signingSecret).to.match(/^whsec_/);",
-                  "        pm.environment.set(\"createdSigningSecret\", responseJson.signingSecret);",
-                  "    });",
-                  "    pm.test(\"Response body does not expose signingSecretCiphertext\", function () {",
-                  "        pm.expect(responseJson).to.not.have.property(\"signingSecretCiphertext\");",
-                  "    });",
-                  "    pm.test(\"Response body has createdAt\", function () {",
-                  "        pm.expect(responseJson).to.have.property(\"createdAt\");",
-                  "    });",
-                  "    pm.test(\"Response body has updatedAt\", function () {",
-                  "        pm.expect(responseJson).to.have.property(\"updatedAt\");",
-                  "    });",
-                  "} else if (pm.response.code === 409) {",
-                  "    pm.test(\"Endpoint already exists (idempotent re-run)\", function () {",
-                  "        pm.expect(true).to.be.true;",
-                  "    });",
-                  "    // Resolve existing endpoint ID by listing endpoints",
-                  "    pm.sendRequest({",
-                  "        url: pm.environment.get(\"base_url\") + \"/v1/endpoints?page=0&size=20\",",
-                  "        method: \"GET\",",
-                  "        header: { \"X-Api-Key\": pm.environment.get(\"api_key\") }",
-                  "    }, function (err, res) {",
-                  "        if (err) { console.log(err); return; }",
-                  "        var endpoints = res.json().endpoints;",
-                  "        var existing = endpoints.find(function (e) {",
-                  "            return e.url === \"https://example.com/webhook\";",
-                  "        });",
-                  "        if (existing) {",
-                  "            pm.environment.set(\"createdEndpointId\", existing.id);",
-                  "        }",
-                  "    });",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints - Blank URL rejected",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"\",\n  \"description\": \"Blank URL test\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Attempts to create an endpoint with a blank URL. Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail with validation errors\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "    pm.expect(json.title).to.equal(\"Bad Request\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints - Non-HTTPS URL rejected",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"http://example.com/webhook\",\n  \"description\": \"Non-HTTPS URL test\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Attempts to create an endpoint with an HTTP (not HTTPS) URL. Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail with validation errors\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "    pm.expect(json.title).to.equal(\"Bad Request\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints - URL too long rejected",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://\" + \"a\".repeat(3000) + \".com/webhook\",\n  \"description\": \"Long URL test\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Attempts to create an endpoint with a URL exceeding 2048 characters. Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail with validation errors\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "    pm.expect(json.title).to.equal(\"Bad Request\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints - Description too long rejected",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://example.com/webhook\",\n  \"description\": \"\" + \"a\".repeat(200)\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Attempts to create an endpoint with a description exceeding 160 characters. Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail with validation errors\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "    pm.expect(json.title).to.equal(\"Bad Request\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints - Missing authentication",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://example.com/webhook\",\n  \"description\": \"No auth test\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Attempts to create an endpoint without the X-Api-Key header. Expects 401 Unauthorized."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 401\", function () {",
-                  "    pm.response.to.have.status(401);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(401);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints - Invalid API key",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "invalid-api-key"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://example.com/webhook\",\n  \"description\": \"Invalid key test\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Attempts to create an endpoint with an invalid API key. Expects 401 Unauthorized."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 401\", function () {",
-                  "    pm.response.to.have.status(401);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(401);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints - Duplicate URL rejected",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://example.com/webhook\",\n  \"description\": \"Duplicate URL test\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Attempts to create an endpoint with the same URL as an existing one. Expects 409 Conflict."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 409\", function () {",
-                  "    pm.response.to.have.status(409);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(409);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints - List endpoints successfully",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints?page=0&size=20",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "0"
-                },
-                {
-                  "key": "size",
-                  "value": "20"
-                }
-              ]
-            },
-            "description": "Lists all endpoints for the authenticated project. Expects 200 OK."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has endpoints array\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"endpoints\");",
-                  "    pm.expect(json.endpoints).to.be.an(\"array\");",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has pagination fields\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"page\");",
-                  "    pm.expect(json).to.have.property(\"size\");",
-                  "    pm.expect(json).to.have.property(\"total\");",
-                  "});",
-                  "",
-                  "pm.test(\"All endpoints belong to the project\", function () {",
-                  "    var json = pm.response.json();",
-                  "    json.endpoints.forEach(function (endpoint) {",
-                  "        pm.expect(endpoint.projectId).to.equal(pm.environment.get(\"project_id\"));",
-                  "    });",
-                  "});",
-                  "",
-                  "pm.test(\"No endpoint exposes signing secret\", function () {",
-                  "    var json = pm.response.json();",
-                  "    json.endpoints.forEach(function (endpoint) {",
-                  "        pm.expect(endpoint).to.not.have.property(\"signingSecretCiphertext\");",
-                  "        pm.expect(endpoint).to.not.have.property(\"signingSecret\");",
-                  "    });",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints - Invalid page (negative)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints?page=-1&size=20",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "-1"
-                },
-                {
-                  "key": "size",
-                  "value": "20"
-                }
-              ]
-            },
-            "description": "Attempts to list endpoints with a negative page number. Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints - Invalid size (zero)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints?page=0&size=0",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "0"
-                },
-                {
-                  "key": "size",
-                  "value": "0"
-                }
-              ]
-            },
-            "description": "Attempts to list endpoints with size=0. Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints - Invalid size (exceeds 100)",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints?page=0&size=200",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "0"
-                },
-                {
-                  "key": "size",
-                  "value": "200"
-                }
-              ]
-            },
-            "description": "Attempts to list endpoints with size=200 (exceeds max of 100). Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints - Missing authentication",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Attempts to list endpoints without the X-Api-Key header. Expects 401 Unauthorized."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 401\", function () {",
-                  "    pm.response.to.have.status(401);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(401);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints/{endpointId} - Get existing endpoint",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{createdEndpointId}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{createdEndpointId}}"
-              ]
-            },
-            "description": "Retrieves a previously created endpoint by ID. Expects 200 OK."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body matches created endpoint\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.id).to.equal(pm.environment.get(\"createdEndpointId\"));",
-                  "    pm.expect(json.url).to.equal(\"https://example.com/webhook\");",
-                  "    pm.expect(json.enabled).to.equal(true);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body does not expose signing secret\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.not.have.property(\"signingSecretCiphertext\");",
-                  "    pm.expect(json).to.not.have.property(\"signingSecret\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints/{endpointId} - Nonexistent endpoint",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "00000000-0000-0000-0000-000000000000"
-              ]
-            },
-            "description": "Attempts to get an endpoint with a nonexistent UUID. Expects 404 Not Found."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(404);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints/{endpointId} - Cross-project access denied",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "00000000-0000-0000-0000-000000000000"
-              ]
-            },
-            "description": "Attempts to access a nonexistent endpoint UUID. Expects 404 Not Found (no information leakage about other projects)."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
-                  "});",
-                  "",
-                  "pm.test(\"Response does not leak endpoint existence\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(404);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PATCH /v1/endpoints/{endpointId} - Update endpoint successfully",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://example.com/webhook-updated\",\n  \"description\": \"Updated smoke test endpoint\",\n  \"enabled\": false\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{createdEndpointId}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{createdEndpointId}}"
-              ]
-            },
-            "description": "Updates a previously created endpoint. Expects 200 OK."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has updated fields\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.id).to.equal(pm.environment.get(\"createdEndpointId\"));",
-                  "    pm.expect(json.url).to.equal(\"https://example.com/webhook-updated\");",
-                  "    pm.expect(json.description).to.equal(\"Updated smoke test endpoint\");",
-                  "    pm.expect(json.enabled).to.equal(false);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has updatedAt\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"updatedAt\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints - Create second endpoint for duplicate URL test",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"https://example.com/webhook2\",\n  \"description\": \"Second endpoint for duplicate URL test\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Creates a second endpoint to enable duplicate URL conflict testing."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 201 or 409\", function () {",
-                  "    pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
-                  "});",
-                  "",
-                  "if (pm.response.code === 201) {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"id\");",
-                  "    pm.environment.set(\"secondEndpointId\", json.id);",
-                  "    pm.environment.set(\"secondEndpointUrl\", json.url);",
-                  "} else if (pm.response.code === 409) {",
-                  "    pm.sendRequest({",
-                  "        url: pm.environment.get(\"base_url\") + \"/v1/endpoints?page=0&size=20\",",
-                  "        method: \"GET\",",
-                  "        header: { \"X-Api-Key\": pm.environment.get(\"api_key\") }",
-                  "    }, function (err, res) {",
-                  "        if (err) { console.log(err); return; }",
-                  "        var endpoints = res.json().endpoints;",
-                  "        var existing = endpoints.find(function (e) {",
-                  "            return e.url === \"https://example.com/webhook2\";",
-                  "        });",
-                  "        if (existing) {",
-                  "            pm.environment.set(\"secondEndpointId\", existing.id);",
-                  "            pm.environment.set(\"secondEndpointUrl\", existing.url);",
-                  "        }",
-                  "    });",
-                  "}"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"url\": \"{{secondEndpointUrl}}\",\n  \"description\": \"Duplicate URL update test\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{createdEndpointId}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{createdEndpointId}}"
-              ]
-            },
-            "description": "Attempts to update an endpoint with a URL that belongs to another endpoint. Expects 409 Conflict."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 409\", function () {",
-                  "    pm.response.to.have.status(409);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(409);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "name": "PATCH /v1/endpoints/{endpointId} - Update with duplicate URL rejected"
-        },
-        {
-          "name": "PATCH /v1/endpoints/{endpointId} - Nonexistent endpoint",
-          "request": {
-            "method": "PATCH",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"description\": \"Nonexistent update test\"\n}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "00000000-0000-0000-0000-000000000000"
-              ]
-            },
-            "description": "Attempts to update a nonexistent endpoint. Expects 404 Not Found."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(404);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints/{endpointId}/enable - Enable endpoint",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{createdEndpointId}}/enable",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{createdEndpointId}}",
-                "enable"
-              ]
-            },
-            "description": "Enables a previously disabled endpoint. Expects 200 OK."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body is empty\", function () {",
-                  "    pm.expect(pm.response.text()).to.equal(\"\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "POST /v1/endpoints/{endpointId}/disable - Disable endpoint",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{createdEndpointId}}/disable",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{createdEndpointId}}",
-                "disable"
-              ]
-            },
-            "description": "Disables a previously enabled endpoint. Expects 200 OK."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body is empty\", function () {",
-                  "    pm.expect(pm.response.text()).to.equal(\"\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "DELETE /v1/endpoints/{endpointId} - Delete endpoint (soft delete)",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{createdEndpointId}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{createdEndpointId}}"
-              ]
-            },
-            "description": "Soft-deletes a previously created endpoint. Expects 204 No Content."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 204\", function () {",
-                  "    pm.response.to.have.status(204);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body is empty\", function () {",
-                  "    pm.expect(pm.response.text()).to.equal(\"\");",
-                  "});",
-                  "",
-                  "pm.collectionVariables.unset(\"createdEndpointId\");"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "DELETE /v1/endpoints/{endpointId} - Delete nonexistent endpoint",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "00000000-0000-0000-0000-000000000000"
-              ]
-            },
-            "description": "Attempts to delete a nonexistent endpoint. Expects 404 Not Found."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(404);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Tenant Isolation",
-      "item": [
-        {
-          "name": "Cross-project endpoint access denied",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "00000000-0000-0000-0000-000000000000"
-              ]
-            },
-            "description": "Verifies that a guessed UUID from another project returns 404 (no information leakage). Expects 404 Not Found."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
-                  "});",
-                  "",
-                  "pm.test(\"Response does not leak project information\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(404);",
-                  "    pm.expect(json.title).to.not.contain(\"project\");",
-                  "    pm.expect(json.title).to.not.contain(\"organization\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "name": "Subscription Management",
-      "item": [
-        {
-          "name": "Setup: Create dedicated endpoint for subscription tests",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              },
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\"url\":\"https://subscriptions.example.com/webhook\",\"description\":\"Subscription test endpoint\"}"
-            },
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints"
-              ]
-            },
-            "description": "Creates a dedicated endpoint for subscription testing."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 201\", function () {",
-                  "    pm.response.to.have.status(201);",
-                  "});",
-                  "",
-                  "var json = pm.response.json();",
-                  "pm.test(\"Response has endpoint ID\", function () {",
-                  "    pm.expect(json).to.have.property(\"id\");",
-                  "    pm.expect(json.id).to.not.be.empty;",
-                  "    pm.environment.set(\"subscriptionEndpointId\", json.id);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has expected URL\", function () {",
-                  "    pm.expect(json.url).to.equal(\"https://subscriptions.example.com/webhook\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Create subscription successfully",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/payment.succeeded",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}",
-                "subscriptions",
-                "payment.succeeded"
-              ]
-            },
-            "description": "Creates a subscription for an event type on an endpoint. Expects 201 Created."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 201\", function () {",
-                  "    pm.response.to.have.status(201);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has id\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"id\");",
-                  "    pm.expect(json.id).to.not.be.empty;",
-                  "    pm.environment.set(\"subscriptionId\", json.id);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has endpointId\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.endpointId).to.equal(pm.environment.get(\"subscriptionEndpointId\"));",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has eventType\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.eventType).to.equal(\"payment.succeeded\");",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has createdAt\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"createdAt\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Idempotent duplicate returns same",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/payment.succeeded",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}",
-                "subscriptions",
-                "payment.succeeded"
-              ]
-            },
-            "description": "Creates the same subscription again. Expects 200 OK with the same subscription ID (idempotent)."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body returns same subscription ID\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.id).to.equal(pm.environment.get(\"subscriptionId\"));",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has eventType\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.eventType).to.equal(\"payment.succeeded\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Invalid event type rejected",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/INVALID_TYPE",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}",
-                "subscriptions",
-                "INVALID_TYPE"
-              ]
-            },
-            "description": "Creates a subscription with an invalid event type (uppercase). Expects 400 Bad Request."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 400\", function () {",
-                  "    pm.response.to.have.status(400);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(400);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Unknown endpoint rejected",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000/subscriptions/payment.succeeded",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "00000000-0000-0000-0000-000000000000",
-                "subscriptions",
-                "payment.succeeded"
-              ]
-            },
-            "description": "Creates a subscription on a nonexistent endpoint. Expects 404 Not Found."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(404);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /v1/endpoints/{endpointId}/subscriptions/{eventType} - Missing authentication",
-          "request": {
-            "method": "PUT",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/payment.succeeded",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}",
-                "subscriptions",
-                "payment.succeeded"
-              ]
-            },
-            "description": "Creates a subscription without the X-Api-Key header. Expects 401 Unauthorized."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 401\", function () {",
-                  "    pm.response.to.have.status(401);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(401);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "DELETE /v1/endpoints/{endpointId}/subscriptions/{eventType} - Delete subscription successfully",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/payment.succeeded",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}",
-                "subscriptions",
-                "payment.succeeded"
-              ]
-            },
-            "description": "Deletes a subscription from an endpoint. Expects 204 No Content."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 204\", function () {",
-                  "    pm.response.to.have.status(204);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body is empty\", function () {",
-                  "    pm.expect(pm.response.text()).to.equal(\"\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "DELETE /v1/endpoints/{endpointId}/subscriptions/{eventType} - Delete nonexistent subscription",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions/nonexistent.type",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}",
-                "subscriptions",
-                "nonexistent.type"
-              ]
-            },
-            "description": "Deletes a subscription that does not exist. Expects 404 Not Found."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(404);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints/{endpointId}/subscriptions - List subscriptions successfully",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/subscriptions?page=0&size=20",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}",
-                "subscriptions"
-              ],
-              "query": [
-                {
-                  "key": "page",
-                  "value": "0"
-                },
-                {
-                  "key": "size",
-                  "value": "20"
-                }
-              ]
-            },
-            "description": "Lists subscriptions for an endpoint. Expects 200 OK."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has subscriptions array\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"subscriptions\");",
-                  "    pm.expect(json.subscriptions).to.be.an(\"array\");",
-                  "});",
-                  "",
-                  "pm.test(\"Response body has pagination fields\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json).to.have.property(\"page\");",
-                  "    pm.expect(json).to.have.property(\"size\");",
-                  "    pm.expect(json).to.have.property(\"total\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "GET /v1/endpoints/{endpointId}/subscriptions - Unknown endpoint rejected",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000/subscriptions",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "00000000-0000-0000-0000-000000000000",
-                "subscriptions"
-              ]
-            },
-            "description": "Lists subscriptions for a nonexistent endpoint. Expects 404 Not Found."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(404);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /v1/endpoints/{endpointId}/rotate-secret - Rotate signing secret successfully",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/rotate-secret",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}",
-                "rotate-secret"
-              ]
-            },
-            "description": "Rotates the signing secret for an endpoint. Expects 200 OK with new plaintext secret."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "var json = pm.response.json();",
-                  "pm.test(\"Response has signingSecret with whsec_ prefix\", function () {",
-                  "    pm.expect(json).to.have.property(\"signingSecret\");",
-                  "    pm.expect(json.signingSecret).to.match(/^whsec_/);",
-                  "    pm.environment.set(\"rotatedSigningSecret\", json.signingSecret);",
-                  "});",
-                  "",
-                  "pm.test(\"Response does not expose signingSecretCiphertext\", function () {",
-                  "    pm.expect(json).to.not.have.property(\"signingSecretCiphertext\");",
-                  "});",
-                  "",
-                  "pm.test(\"Response has updatedAt\", function () {",
-                  "    pm.expect(json).to.have.property(\"updatedAt\");",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /v1/endpoints/{endpointId}/rotate-secret - Unknown endpoint rejected",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000/rotate-secret",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "00000000-0000-0000-0000-000000000000",
-                "rotate-secret"
-              ]
-            },
-            "description": "Rotates a secret on a nonexistent endpoint. Expects 404 Not Found."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 404\", function () {",
-                  "    pm.response.to.have.status(404);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(404);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "PUT /v1/endpoints/{endpointId}/rotate-secret - Missing authentication",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}/rotate-secret",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}",
-                "rotate-secret"
-              ]
-            },
-            "description": "Rotates a secret without the X-Api-Key header. Expects 401 Unauthorized."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 401\", function () {",
-                  "    pm.response.to.have.status(401);",
-                  "});",
-                  "",
-                  "pm.test(\"Response is ProblemDetail\", function () {",
-                  "    var json = pm.response.json();",
-                  "    pm.expect(json.status).to.equal(401);",
-                  "});"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Teardown: Delete dedicated endpoint",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "X-Api-Key",
-                "value": "{{api_key}}"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/v1/endpoints/{{subscriptionEndpointId}}",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "v1",
-                "endpoints",
-                "{{subscriptionEndpointId}}"
-              ]
-            },
-            "description": "Deletes the dedicated subscription test endpoint. Expects 204 No Content."
-          },
-          "response": [],
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 204\", function () {",
-                  "    pm.response.to.have.status(204);",
-                  "});",
-                  "",
-                  "pm.test(\"Response body is empty\", function () {",
-                  "    pm.expect(pm.response.text()).to.equal(\"\");",
-                  "});",
-                  "",
-                  "pm.environment.unset(\"subscriptionEndpointId\");",
-                  "pm.environment.unset(\"subscriptionId\");"
-                ]
-              }
-            }
-          ]
-        }
-      ]
-    }
-  ],
   "variable": [
     {
       "key": "base_url",
-      "value": "http://localhost:8080",
-      "type": "string"
+      "value": "http://localhost:8080"
     },
     {
-      "key": "api_key",
-      "value": "PLACEHOLDER_DEV_API_KEY",
-      "type": "string"
+      "key": "invalid_api_key",
+      "value": "invalid"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if (!pm.variables.get('runId')) {",
+          "    ['api_key', 'other_api_key', 'project_id'].forEach(function (name) {",
+          "        const value = pm.environment.get(name);",
+          "        if (!value || value.includes('PLACEHOLDER')) throw new Error('Configure ' + name + ' for an isolated test environment');",
+          "    });",
+          "    if (pm.environment.get('api_key') === pm.environment.get('other_api_key')) throw new Error('Two distinct project API keys are required');",
+          "    pm.variables.set('runId', pm.variables.replaceIn('{{$guid}}'));",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/actuator/health"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
     },
     {
-      "key": "project_id",
-      "value": "PLACEHOLDER_PROJECT_ID",
-      "type": "string"
+      "name": "Create owned endpoint",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://8.8.8.8/hook/{{runId}}\",\n  \"description\": \"Collection test\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', function () { pm.response.to.have.status(201); });",
+              "pm.test('Save created ID', function () { const b=pm.response.json(); pm.expect(b.id).to.be.a('string'); pm.variables.set('endpointId', b.id); });",
+              "pm.test('Secret is returned once and cannot be cached', function () { pm.expect(pm.response.json().signingSecret).to.match(/^whsec_/); pm.expect(pm.response.headers.get('Cache-Control')).to.equal('no-store'); pm.expect(pm.response.text()).not.to.match(/ciphertext|nonce/i); });"
+            ]
+          }
+        }
+      ]
     },
     {
-      "key": "createdEndpointId",
-      "value": "",
-      "type": "string"
+      "name": "Create foreign endpoint with second project key",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{other_api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://8.8.8.8/hook/{{runId}}/foreign\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', function () { pm.response.to.have.status(201); });",
+              "pm.test('Save created ID', function () { const b=pm.response.json(); pm.expect(b.id).to.be.a('string'); pm.variables.set('foreignEndpointId', b.id); });",
+              "pm.test('Secret is returned once and cannot be cached', function () { pm.expect(pm.response.json().signingSecret).to.match(/^whsec_/); pm.expect(pm.response.headers.get('Cache-Control')).to.equal('no-store'); pm.expect(pm.response.text()).not.to.match(/ciphertext|nonce/i); });",
+              "pm.test('Different project', function () { pm.expect(pm.response.json().projectId).not.to.equal(pm.environment.get('project_id')); });"
+            ]
+          }
+        }
+      ]
     },
     {
-      "key": "secondEndpointId",
-      "value": "",
-      "type": "string"
+      "name": "Confirm foreign endpoint exists for its owner",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{other_api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('No secret material', function () { pm.expect(pm.response.text()).not.to.match(/signingSecret|whsec_|ciphertext|nonce/); });"
+            ]
+          }
+        }
+      ]
     },
     {
-      "key": "secondEndpointUrl",
-      "value": "",
-      "type": "string"
+      "name": "Create foreign subscription with its owner key",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{other_api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}/subscriptions/payment.succeeded"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Foreign subscription exists', function () { pm.response.to.have.status(201); });"
+            ]
+          }
+        }
+      ]
     },
     {
-      "key": "subscriptionId",
-      "value": "",
-      "type": "string"
+      "name": "Duplicate URL rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://8.8.8.8/hook/{{runId}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 409', function () { pm.response.to.have.status(409); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Missing authentication",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{base_url}}/v1/endpoints"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 401', function () { pm.response.to.have.status(401); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invalid authentication",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{invalid_api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 401', function () { pm.response.to.have.status(401); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Blank URL rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "HTTP URL rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"http://8.8.8.8/hook\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "url length rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://8.8.8.8/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });",
+              "pm.test('Field length validation', function () { pm.expect(pm.response.json().errors['url']).to.include('must not exceed'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "description length rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://8.8.8.8/hook/{{runId}}/long\",\n  \"description\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });",
+              "pm.test('Field length validation', function () { pm.expect(pm.response.json().errors['description']).to.include('must not exceed'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List owned endpoints",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints?page=0&size=20"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('No secret material', function () { pm.expect(pm.response.text()).not.to.match(/signingSecret|whsec_|ciphertext|nonce/); });",
+              "pm.test('Page and tenant', function () { const b=pm.response.json(); pm.expect(b).to.have.all.keys('endpoints','page','size','total'); pm.expect(b.endpoints.some(e => e.id === pm.variables.get('endpointId'))).to.equal(true); b.endpoints.forEach(e => pm.expect(e.projectId).to.equal(pm.environment.get('project_id'))); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invalid pagination page=-1",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints?page=-1"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invalid pagination size=0",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints?size=0"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invalid pagination size=101",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints?size=101"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Get owned endpoint",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('No secret material', function () { pm.expect(pm.response.text()).not.to.match(/signingSecret|whsec_|ciphertext|nonce/); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Unknown endpoint",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-project GET endpoint",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-project PATCH endpoint",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"unauthorized\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-project DELETE endpoint",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-project POST /enable",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}/enable"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-project POST /disable",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}/disable"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-project POST /rotate-secret",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}/rotate-secret"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-project PUT /subscriptions/payment.succeeded",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}/subscriptions/payment.succeeded"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-project DELETE /subscriptions/payment.succeeded",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}/subscriptions/payment.succeeded"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cross-project GET /subscriptions",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}/subscriptions"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Foreign endpoint remains unchanged",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{other_api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('Foreign state intact', function () { pm.expect(pm.response.json().enabled).to.equal(true); pm.expect(pm.response.json().description).to.equal(undefined); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Update owned endpoint",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"Updated\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('No secret material', function () { pm.expect(pm.response.text()).not.to.match(/signingSecret|whsec_|ciphertext|nonce/); });",
+              "pm.test('Description updated', function () { pm.expect(pm.response.json().description).to.equal('Updated'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create second owned endpoint",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://8.8.8.8/hook/{{runId}}/second\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', function () { pm.response.to.have.status(201); });",
+              "pm.test('Save created ID', function () { const b=pm.response.json(); pm.expect(b.id).to.be.a('string'); pm.variables.set('secondEndpointId', b.id); });",
+              "pm.test('Secret is returned once and cannot be cached', function () { pm.expect(pm.response.json().signingSecret).to.match(/^whsec_/); pm.expect(pm.response.headers.get('Cache-Control')).to.equal('no-store'); pm.expect(pm.response.text()).not.to.match(/ciphertext|nonce/i); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Duplicate update rejected",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://8.8.8.8/hook/{{runId}}/second\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 409', function () { pm.response.to.have.status(409); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Disable owned endpoint",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}/disable"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Enable owned endpoint",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}/enable"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create subscription",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}/subscriptions/payment.succeeded"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', function () { pm.response.to.have.status(201); });",
+              "pm.variables.set('subscriptionId', pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replay subscription",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}/subscriptions/payment.succeeded"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('Same subscription', function () { pm.expect(pm.response.json().id).to.equal(pm.variables.get('subscriptionId')); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "List subscriptions",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}/subscriptions"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('Subscription page', function () { const b=pm.response.json(); pm.expect(b).to.have.all.keys('subscriptions','page','size','total'); pm.expect(b.subscriptions.map(s=>s.id)).to.include(pm.variables.get('subscriptionId')); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invalid event type",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}/subscriptions/INVALID_TYPE"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Rotate owned secret",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}/rotate-secret"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('Secret is returned once and cannot be cached', function () { pm.expect(pm.response.json().signingSecret).to.match(/^whsec_/); pm.expect(pm.response.headers.get('Cache-Control')).to.equal('no-store'); pm.expect(pm.response.text()).not.to.match(/ciphertext|nonce/i); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Read after rotation hides secret",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', function () { pm.response.to.have.status(200); });",
+              "pm.test('No secret material', function () { pm.expect(pm.response.text()).not.to.match(/signingSecret|whsec_|ciphertext|nonce/); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Delete subscription",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}/subscriptions/payment.succeeded"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Delete absent subscription",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}/subscriptions/payment.succeeded"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Ingest event",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "postman-{{runId}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": {\n    \"synthetic\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 202', function () { pm.response.to.have.status(202); });",
+              "pm.variables.set('eventId',pm.response.json().eventId); pm.test('First acceptance',function(){pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.equal('false');});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Replay identical event",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "postman-{{runId}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": {\n    \"synthetic\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 202', function () { pm.response.to.have.status(202); });",
+              "pm.test('Idempotent replay',function(){pm.expect(pm.response.json().eventId).to.equal(pm.variables.get('eventId'));pm.expect(pm.response.headers.get('Idempotent-Replayed')).to.equal('true');});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Conflicting event rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Idempotency-Key",
+            "value": "postman-{{runId}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"payment.failed\",\n  \"data\": {}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 409', function () { pm.response.to.have.status(409); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Missing event fields",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invalid event format",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"INVALID_TYPE\",\n  \"data\": {}\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Event data must be object",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": []\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 400', function () { pm.response.to.have.status(400); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Event needs authentication",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/events",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": {\n    \"synthetic\": true\n  }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 401', function () { pm.response.to.have.status(401); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cleanup endpointId",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cleanup secondEndpointId",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{secondEndpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cleanup foreignEndpointId",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{other_api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{foreignEndpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204', function () { pm.response.to.have.status(204); });"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Deleted endpoint unavailable",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints/{{endpointId}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404', function () { pm.response.to.have.status(404); });",
+              "pm.test('Problem response', function () { const p=pm.response.json(); pm.expect(p.status).to.equal(pm.response.code); pm.expect(p).to.have.property('detail'); });"
+            ]
+          }
+        }
+      ]
     }
   ]
 }

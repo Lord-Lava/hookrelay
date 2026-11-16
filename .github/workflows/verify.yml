@@ -1,0 +1,95 @@
+name: Verify
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '25.0.5+8'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.13.0'
+      - name: Verify Wrapper JAR against Gradle's published checksum
+        shell: bash
+        run: |
+          expected=$(curl --fail --silent --show-error --location https://services.gradle.org/distributions/gradle-9.9.1-wrapper.jar.sha256)
+          printf '%s  backend/gradle/wrapper/gradle-wrapper.jar\n' "$expected" | sha256sum --check
+      - name: Build, test and generate SBOM
+        working-directory: backend
+        run: ./gradlew --no-daemon --version clean check bootJar cyclonedxBom
+      - name: Validate collection JSON and scripts
+        run: node postman/check-collections.mjs
+      - name: Build image from source with strict dependency verification
+        run: docker build --progress=plain -t hookrelay-review:local backend
+      - name: Verify packaged application in isolated Compose services
+        run: python3 scripts/verify-compose.py --image hookrelay-review:local
+      - name: Scan image and repository secrets
+        run: scripts/scan-containers.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: build-and-image-reports
+          path: backend/build/reports/
+          retention-days: 14
+  dependencies:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '25.0.5+8'
+      - name: Scan application, test and build-plugin dependencies
+        working-directory: backend
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: ./gradlew --no-daemon dependencyCheckAnalyze --rerun-tasks
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: dependency-reports
+          path: backend/build/reports/dependency-check-report.*
+          retention-days: 14
+  static-analysis:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
+        with:
+          distribution: temurin
+          java-version: '25.0.5+8'
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          languages: java-kotlin
+          build-mode: manual
+          queries: security-extended
+      - name: Compile for CodeQL
+        working-directory: backend
+        run: ./gradlew --no-daemon clean classes
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
