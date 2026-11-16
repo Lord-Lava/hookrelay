@@ -87,7 +87,7 @@ class EndpointSubscriptionServiceIntegrationTest {
         new WebhookEndpoint(
             null,
             projectId,
-            "https://198.51.100.10/webhook",
+            "https://8.8.4.10/webhook",
             "Test",
             "",
             new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
@@ -102,7 +102,7 @@ class EndpointSubscriptionServiceIntegrationTest {
         new WebhookEndpoint(
             null,
             otherProjectId,
-            "https://192.0.2.50/webhook",
+            "https://8.8.8.50/webhook",
             "Other",
             "",
             new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
@@ -297,5 +297,28 @@ class EndpointSubscriptionServiceIntegrationTest {
 
     assertThat(result.created()).isTrue();
     assertThat(result.response().eventType()).isEqualTo("payment.succeeded");
+  }
+
+  @Test
+  void concurrentPutsReturnOneSubscription() throws Exception {
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+      var futures =
+          new java.util.ArrayList<
+              java.util.concurrent.Future<EndpointSubscriptionService.SubscriptionResult>>();
+      for (int i = 0; i < 8; i++)
+        futures.add(
+            executor.submit(() -> {
+              start.await();
+              return subscriptionService.createOrUpdateSubscription(
+                  projectId, endpointId, "race.event");
+            }));
+      start.countDown();
+      var results = new java.util.ArrayList<EndpointSubscriptionService.SubscriptionResult>();
+      for (var f : futures) results.add(f.get(15, java.util.concurrent.TimeUnit.SECONDS));
+      assertThat(results.stream().map(r -> r.response().id()).distinct()).hasSize(1);
+      assertThat(results.stream().filter(EndpointSubscriptionService.SubscriptionResult::created))
+          .hasSize(1);
+    }
   }
 }

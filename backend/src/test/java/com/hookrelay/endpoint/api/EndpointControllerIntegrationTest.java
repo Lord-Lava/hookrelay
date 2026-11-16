@@ -495,4 +495,28 @@ class EndpointControllerIntegrationTest {
     service.updateEndpoint(endpoint.id(), projectId, "https://customer.example/other", null, null);
     assertThat(calls.get()).isEqualTo(2);
   }
+
+  @Test
+  void staleMetadataSaveCannotRestoreRotatedSecret() {
+    var created = endpointService.createEndpoint(projectId, "https://8.8.8.8/race", "before");
+    var rotated = endpointService.rotateSigningSecret(created.endpoint().id(), projectId);
+    endpointRepository.save(created.endpoint());
+    assertThat(endpointService.getSigningSecret(created.endpoint().id(), projectId))
+        .isEqualTo(rotated.signingSecret());
+  }
+
+  @Test
+  void urlIdentityPreservesPathCaseAndNormalizesAuthority() {
+    var first = endpointService.createEndpoint(projectId, "HTTPS://8.8.8.8:443/Hook", "first");
+    var second = endpointService.createEndpoint(projectId, "https://8.8.8.8/hook", "second");
+    assertThat(first.endpoint().id()).isNotEqualTo(second.endpoint().id());
+    assertThatThrownBy(
+            () -> endpointService.createEndpoint(projectId, "https://8.8.8.8/Hook", "duplicate"))
+        .isInstanceOf(EndpointAlreadyExistsException.class);
+  }
+
+  @Test
+  void paginationDoesNotOverflow() {
+    assertThat(endpointService.listEndpoints(projectId, Integer.MAX_VALUE, 100)).isEmpty();
+  }
 }

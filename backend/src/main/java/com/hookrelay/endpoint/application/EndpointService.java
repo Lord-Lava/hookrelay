@@ -44,17 +44,12 @@ public class EndpointService {
    */
   public CreatedEndpointResult createEndpoint(UUID projectId, String url, String description) {
     ssrfUrlValidator.validate(url);
-    return transactions.execute(status -> createValidatedEndpoint(projectId, url, description));
+    return transactions.execute(
+        status -> createValidatedEndpoint(projectId, EndpointUrls.canonical(url), description));
   }
 
   private CreatedEndpointResult createValidatedEndpoint(
       UUID projectId, String url, String description) {
-
-    List<WebhookEndpoint> existing = endpointRepository.findByProject(projectId);
-    if (existing.stream().anyMatch(e -> e.url().equalsIgnoreCase(url))) {
-      throw new EndpointAlreadyExistsException(
-          "Endpoint URL already exists for this project: " + url);
-    }
 
     if (!signingSecretService.isConfigured()) {
       // No encryption key configured - store empty ciphertext sentinel (backward compatible)
@@ -66,7 +61,7 @@ public class EndpointService {
         return new CreatedEndpointResult(endpointRepository.save(endpoint), null);
       } catch (DataIntegrityViolationException exception) {
         throw new EndpointAlreadyExistsException(
-            "Endpoint URL already exists for this project: " + url, exception);
+            "Endpoint URL already exists for this project", exception);
       }
     }
 
@@ -91,7 +86,7 @@ public class EndpointService {
       return new CreatedEndpointResult(saved, plaintextSecret);
     } catch (DataIntegrityViolationException exception) {
       throw new EndpointAlreadyExistsException(
-          "Endpoint URL already exists for this project: " + url, exception);
+          "Endpoint URL already exists for this project", exception);
     }
   }
 
@@ -100,7 +95,9 @@ public class EndpointService {
   }
 
   public List<WebhookEndpoint> listEndpoints(UUID projectId, int page, int size) {
-    int offset = page * size;
+    if (page < 0 || size < 1 || size > 100)
+      throw new IllegalArgumentException("Invalid pagination");
+    long offset = (long) page * size;
     return endpointRepository.findByProjectPaginated(projectId, offset, size);
   }
 
@@ -114,25 +111,16 @@ public class EndpointService {
       UUID id, UUID projectId, String url, String description, Boolean enabled) {
     getEndpoint(id, projectId);
     if (url != null) ssrfUrlValidator.validate(url);
-    return transactions.execute(
-        status -> updateValidatedEndpoint(id, projectId, url, description, enabled));
+    return transactions.execute(status ->
+        updateValidatedEndpoint(
+            id, projectId, url == null ? null : EndpointUrls.canonical(url), description, enabled));
   }
 
   private WebhookEndpoint updateValidatedEndpoint(
       UUID id, UUID projectId, String url, String description, Boolean enabled) {
-    WebhookEndpoint existing = getEndpoint(id, projectId);
+    WebhookEndpoint existing = lockEndpoint(id, projectId);
 
     String resolvedUrl = url != null ? url : existing.url();
-    if (!resolvedUrl.equals(existing.url())) {
-
-      List<WebhookEndpoint> existingEndpoints = endpointRepository.findByProject(projectId);
-      if (existingEndpoints.stream()
-          .anyMatch(e -> !e.id().equals(id) && e.url().equalsIgnoreCase(resolvedUrl))) {
-        throw new EndpointAlreadyExistsException(
-            "Endpoint URL already exists for this project: " + resolvedUrl);
-      }
-    }
-
     WebhookEndpoint updated =
         new WebhookEndpoint(
             existing.id(),
@@ -150,13 +138,19 @@ public class EndpointService {
       return endpointRepository.save(updated);
     } catch (DataIntegrityViolationException exception) {
       throw new EndpointAlreadyExistsException(
-          "Endpoint URL already exists for this project: " + resolvedUrl, exception);
+          "Endpoint URL already exists for this project", exception);
     }
+  }
+
+  private WebhookEndpoint lockEndpoint(UUID id, UUID projectId) {
+    return endpointRepository
+        .findForUpdateAndProject(id, projectId)
+        .orElseThrow(() -> new EndpointNotFoundException("Endpoint not found"));
   }
 
   @Transactional
   public void enableEndpoint(UUID id, UUID projectId) {
-    WebhookEndpoint existing = getEndpoint(id, projectId);
+    WebhookEndpoint existing = lockEndpoint(id, projectId);
     if (existing.enabled()) {
       return;
     }
@@ -178,7 +172,7 @@ public class EndpointService {
 
   @Transactional
   public void disableEndpoint(UUID id, UUID projectId) {
-    WebhookEndpoint existing = getEndpoint(id, projectId);
+    WebhookEndpoint existing = lockEndpoint(id, projectId);
     if (!existing.enabled()) {
       return;
     }
@@ -236,29 +230,14 @@ public class EndpointService {
       throw new IllegalStateException("Signing secret encryption is not configured");
     }
 
-    WebhookEndpoint existing = getEndpoint(id, projectId);
+    WebhookEndpoint existing = lockEndpoint(id, projectId);
 
     String plaintextSecret = signingSecretService.generateSecret();
     SigningSecretService.EncryptedSecret encrypted = signingSecretService.encrypt(plaintextSecret);
 
     WebhookEndpoint updated =
-        new WebhookEndpoint(
-            existing.id(),
-            existing.projectId(),
-            existing.url(),
-            existing.description(),
-            encrypted.ciphertext(),
-            encrypted.nonce(),
-            encrypted.keyVersion(),
-            existing.enabled(),
-            existing.createdAt(),
-            Instant.now(),
-            existing.deletedAt());
-    try {
-      endpointRepository.save(updated);
-    } catch (DataIntegrityViolationException exception) {
-      throw new EndpointAlreadyExistsException("Endpoint rotation conflict for: " + id, exception);
-    }
+        endpointRepository.updateSigningSecret(
+            id, projectId, encrypted.ciphertext(), encrypted.nonce(), encrypted.keyVersion());
 
     // Record audit event without storing any secret material.
     recordSecretRotationAudit(projectId, id);

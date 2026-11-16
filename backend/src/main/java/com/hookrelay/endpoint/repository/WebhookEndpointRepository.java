@@ -38,7 +38,26 @@ public class WebhookEndpointRepository {
         projectId);
   }
 
-  public List<WebhookEndpoint> findByProjectPaginated(UUID projectId, int offset, int limit) {
+  public Optional<WebhookEndpoint> findForUpdateAndProject(UUID id, UUID projectId) {
+    return jdbcTemplate.query(
+        """
+        SELECT id, project_id, url, description, signing_secret_ciphertext,
+               signing_secret_nonce, signing_secret_key_version, enabled,
+               created_at, updated_at, deleted_at
+        FROM endpoints
+        WHERE id = ? AND project_id = ? AND deleted_at IS NULL FOR UPDATE
+        """,
+        rs -> {
+          if (!rs.next()) {
+            return Optional.empty();
+          }
+          return Optional.of(mapRow(rs));
+        },
+        id,
+        projectId);
+  }
+
+  public List<WebhookEndpoint> findByProjectPaginated(UUID projectId, long offset, int limit) {
     return jdbcTemplate.query(
         """
         SELECT id, project_id, url, description, signing_secret_ciphertext,
@@ -46,7 +65,7 @@ public class WebhookEndpointRepository {
                created_at, updated_at, deleted_at
         FROM endpoints
         WHERE project_id = ? AND deleted_at IS NULL
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ? OFFSET ?
         """,
         rs -> {
@@ -69,7 +88,7 @@ public class WebhookEndpointRepository {
                created_at, updated_at, deleted_at
         FROM endpoints
         WHERE project_id = ? AND deleted_at IS NULL
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         """,
         rs -> {
           List<WebhookEndpoint> endpoints = new ArrayList<>();
@@ -122,16 +141,11 @@ public class WebhookEndpointRepository {
         jdbcTemplate.update(
             """
             UPDATE endpoints
-            SET url = ?, description = ?, signing_secret_ciphertext = ?,
-                signing_secret_nonce = ?, signing_secret_key_version = ?,
-                enabled = ?, updated_at = now()
+            SET url = ?, description = ?, enabled = ?, updated_at = now()
             WHERE id = ? AND project_id = ? AND deleted_at IS NULL
             """,
             endpoint.url(),
             endpoint.description(),
-            endpoint.signingSecretCiphertext(),
-            endpoint.nonce(),
-            endpoint.keyVersion(),
             endpoint.enabled(),
             endpoint.id(),
             endpoint.projectId());
@@ -143,6 +157,25 @@ public class WebhookEndpointRepository {
     return findByIdAndProject(endpoint.id(), endpoint.projectId())
         .orElseThrow(
             () -> new IllegalStateException("Endpoint disappeared after update: " + endpoint.id()));
+  }
+
+  public WebhookEndpoint updateSigningSecret(
+      UUID id, UUID projectId, String ciphertext, byte[] nonce, String keyVersion) {
+    int changed =
+        jdbcTemplate.update(
+            """
+            UPDATE endpoints SET signing_secret_ciphertext = ?, signing_secret_nonce = ?,
+              signing_secret_key_version = ?, updated_at = now()
+            WHERE id = ? AND project_id = ? AND deleted_at IS NULL
+            """,
+            ciphertext,
+            nonce,
+            keyVersion,
+            id,
+            projectId);
+    if (changed == 0)
+      throw new com.hookrelay.endpoint.application.EndpointNotFoundException("Endpoint not found");
+    return findByIdAndProject(id, projectId).orElseThrow();
   }
 
   public int softDelete(UUID id, UUID projectId) {

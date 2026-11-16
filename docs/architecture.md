@@ -42,3 +42,17 @@ registration policy is not a connection-time guarantee. There is no outbound del
 Phase 3 must pin every connection to a validated address, preserve TLS hostname verification and
 disable redirects. See the Java 25 InetAddress API for literal versus hostname resolution semantics:
 https://docs.oracle.com/en/java/javase/25/docs/api/java.base/java/net/InetAddress.html
+
+## ADR-009: Endpoint mutation serialization and URL identity
+
+Endpoint metadata updates, enable/disable, rotation and subscription mutations serialize on the
+project-scoped endpoint row. DNS work completes before acquiring this lock. Metadata SQL never
+rewrites encryption columns; rotation updates only encryption fields. Subscription repository
+writes also require an explicit project predicate. Concurrent PUT requests return one created
+subscription and subsequent existing responses, without treating uniqueness violations as 500s.
+
+URL identity normalizes HTTPS scheme, host case/trailing dot, default port and empty path, while
+preserving path/query case and escaped bytes. V5 normalizes existing URLs and replaces the old
+whole-URL case-insensitive index. Before a large deployment, inspect equivalent URLs and plan the
+migration's table/index locks; a normalization collision aborts migration without deleting data.
+Pagination uses 64-bit offsets and a UUID tie-breaker for equal creation timestamps.

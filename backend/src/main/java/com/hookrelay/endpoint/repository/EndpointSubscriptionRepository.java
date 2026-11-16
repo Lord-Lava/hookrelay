@@ -48,7 +48,7 @@ public class EndpointSubscriptionRepository {
         JOIN endpoints e ON e.id = s.endpoint_id
         WHERE s.endpoint_id = ? AND e.project_id = ?
           AND s.deleted_at IS NULL AND e.deleted_at IS NULL
-        ORDER BY s.created_at DESC
+        ORDER BY s.created_at DESC, s.id DESC
         """,
         rs -> {
           List<EndpointSubscription> subscriptions = new ArrayList<>();
@@ -82,54 +82,48 @@ public class EndpointSubscriptionRepository {
         projectId);
   }
 
-  public EndpointSubscription save(EndpointSubscription subscription) {
+  public EndpointSubscription save(EndpointSubscription subscription, UUID projectId) {
     if (subscription.id() == null) {
-      return insert(subscription);
+      return insert(subscription, projectId);
     }
-    return update(subscription);
+    return update(subscription, projectId);
   }
 
-  private EndpointSubscription insert(EndpointSubscription subscription) {
-    // Verify the endpoint exists and is not soft-deleted before subscribing
-    int endpointCount =
-        jdbcTemplate.queryForObject(
-            """
-            SELECT COUNT(*)
-            FROM endpoints
-            WHERE id = ? AND deleted_at IS NULL
-            """,
-            (rs, rowNum) -> rs.getInt(1),
-            subscription.endpointId());
-    if (endpointCount == 0) {
-      throw new IllegalStateException(
-          "Cannot create subscription: endpoint not found or is soft-deleted: "
-              + subscription.endpointId());
-    }
-
+  private EndpointSubscription insert(EndpointSubscription subscription, UUID projectId) {
     UUID id = UUID.randomUUID();
-    return jdbcTemplate.queryForObject(
-        """
-        INSERT INTO endpoint_subscriptions (id, endpoint_id, event_type, created_at)
-        VALUES (?, ?, ?, now())
-        RETURNING id, endpoint_id, event_type, created_at, deleted_at
-        """,
-        (rs, rowNum) -> mapRow(rs),
-        id,
-        subscription.endpointId(),
-        subscription.eventType());
+    var rows =
+        jdbcTemplate.query(
+            """
+            INSERT INTO endpoint_subscriptions (id, endpoint_id, event_type, created_at)
+            SELECT ?, e.id, ?, now() FROM endpoints e
+            WHERE e.id = ? AND e.project_id = ? AND e.deleted_at IS NULL
+            RETURNING id, endpoint_id, event_type, created_at, deleted_at
+            """,
+            (rs, rowNum) -> mapRow(rs),
+            id,
+            subscription.eventType(),
+            subscription.endpointId(),
+            projectId);
+    if (rows.isEmpty())
+      throw new IllegalStateException(
+          "Cannot create subscription: endpoint not found or is soft-deleted");
+    return rows.getFirst();
   }
 
-  private EndpointSubscription update(EndpointSubscription subscription) {
+  private EndpointSubscription update(EndpointSubscription subscription, UUID projectId) {
     int updated =
         jdbcTemplate.update(
             """
-            UPDATE endpoint_subscriptions
+            UPDATE endpoint_subscriptions s
             SET event_type = ?
-            WHERE id = ? AND endpoint_id = ? AND deleted_at IS NULL
+            FROM endpoints e
+            WHERE s.id = ? AND s.endpoint_id = ? AND s.deleted_at IS NULL
+              AND e.id = s.endpoint_id AND e.project_id = ? AND e.deleted_at IS NULL
             """,
             subscription.eventType(),
             subscription.id(),
-            subscription.endpointId());
+            subscription.endpointId(),
+            projectId);
     if (updated == 0) {
       throw new IllegalStateException(
           "Subscription was not found or was already soft-deleted: " + subscription.id());
@@ -166,7 +160,7 @@ public class EndpointSubscriptionRepository {
   }
 
   public List<EndpointSubscription> findByEndpointIdAndProjectPaginated(
-      UUID endpointId, UUID projectId, int offset, int limit) {
+      UUID endpointId, UUID projectId, long offset, int limit) {
     return jdbcTemplate.query(
         """
         SELECT s.id, s.endpoint_id, s.event_type, s.created_at, s.deleted_at
@@ -174,7 +168,7 @@ public class EndpointSubscriptionRepository {
         JOIN endpoints e ON e.id = s.endpoint_id
         WHERE s.endpoint_id = ? AND e.project_id = ?
           AND s.deleted_at IS NULL AND e.deleted_at IS NULL
-        ORDER BY s.created_at DESC
+        ORDER BY s.created_at DESC, s.id DESC
         LIMIT ? OFFSET ?
         """,
         rs -> {

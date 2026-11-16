@@ -42,7 +42,7 @@ public class EndpointSubscriptionService {
     // information about other projects' endpoints.
     WebhookEndpoint endpoint =
         endpointRepository
-            .findByIdAndProject(endpointId, projectId)
+            .findForUpdateAndProject(endpointId, projectId)
             .orElseThrow(() -> new EndpointNotFoundException("Endpoint not found: " + endpointId));
 
     // Idempotent: if subscription already exists, return it without creating a duplicate.
@@ -56,7 +56,7 @@ public class EndpointSubscriptionService {
 
     EndpointSubscription subscription =
         new EndpointSubscription(null, endpointId, eventType, null, null);
-    EndpointSubscription saved = subscriptionRepository.save(subscription);
+    EndpointSubscription saved = subscriptionRepository.save(subscription, projectId);
     return new SubscriptionResult(toResponse(saved), true);
   }
 
@@ -66,7 +66,7 @@ public class EndpointSubscriptionService {
 
     // Verify the endpoint exists and belongs to the authenticated project.
     endpointRepository
-        .findByIdAndProject(endpointId, projectId)
+        .findForUpdateAndProject(endpointId, projectId)
         .orElseThrow(() -> new EndpointNotFoundException("Endpoint not found: " + endpointId));
 
     // Soft-delete the subscription. Returns 0 rows if no matching active subscription exists,
@@ -87,7 +87,9 @@ public class EndpointSubscriptionService {
         .findByIdAndProject(endpointId, projectId)
         .orElseThrow(() -> new EndpointNotFoundException("Endpoint not found: " + endpointId));
 
-    int offset = page * size;
+    if (page < 0 || size < 1 || size > 100)
+      throw new IllegalArgumentException("Invalid pagination");
+    long offset = (long) page * size;
     return subscriptionRepository.findByEndpointIdAndProjectPaginated(
         endpointId, projectId, offset, size);
   }

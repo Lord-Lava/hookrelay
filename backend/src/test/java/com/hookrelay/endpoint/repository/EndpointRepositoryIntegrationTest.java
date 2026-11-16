@@ -116,21 +116,21 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void findByIdAndProjectReturnsEndpointWhenOwnedByProject() {
-    WebhookEndpoint expected = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint expected = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
 
     var found = endpointRepository.findByIdAndProject(expected.id(), PROJECT_ID_A);
 
     assertThat(found).isPresent();
     assertThat(found.get().id()).isEqualTo(expected.id());
     assertThat(found.get().projectId()).isEqualTo(PROJECT_ID_A);
-    assertThat(found.get().url()).isEqualTo("https://192.0.2.10/webhook");
+    assertThat(found.get().url()).isEqualTo("https://8.8.8.10/webhook");
     assertThat(found.get().enabled()).isTrue();
     assertThat(found.get().deletedAt()).isNull();
   }
 
   @Test
   void findByIdAndProjectReturnsEmptyForDifferentProject() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
 
     var found = endpointRepository.findByIdAndProject(endpoint.id(), PROJECT_ID_B);
 
@@ -139,7 +139,7 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void findByIdAndProjectReturnsEmptyForSoftDeletedEndpoint() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
     endpointRepository.softDelete(endpoint.id(), PROJECT_ID_A);
 
     var found = endpointRepository.findByIdAndProject(endpoint.id(), PROJECT_ID_A);
@@ -149,9 +149,9 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void findByProjectReturnsOnlyEndpointsForThatProject() {
-    insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook-a", true);
-    insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook-b", true);
-    insertEndpoint(PROJECT_ID_B, "https://192.0.2.20/webhook", true);
+    insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook-a", true);
+    insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook-b", true);
+    insertEndpoint(PROJECT_ID_B, "https://8.8.8.20/webhook", true);
 
     List<WebhookEndpoint> endpoints = endpointRepository.findByProject(PROJECT_ID_A);
 
@@ -162,8 +162,8 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void findByProjectExcludesSoftDeletedEndpoints() {
-    WebhookEndpoint active = insertEndpoint(PROJECT_ID_A, "https://192.0.2.30/webhook", true);
-    WebhookEndpoint deleted = insertEndpoint(PROJECT_ID_A, "https://192.0.2.31/webhook", true);
+    WebhookEndpoint active = insertEndpoint(PROJECT_ID_A, "https://8.8.8.30/webhook", true);
+    WebhookEndpoint deleted = insertEndpoint(PROJECT_ID_A, "https://8.8.8.31/webhook", true);
     endpointRepository.softDelete(deleted.id(), PROJECT_ID_A);
 
     List<WebhookEndpoint> endpoints = endpointRepository.findByProject(PROJECT_ID_A);
@@ -174,7 +174,7 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void softDeleteMarksDeletedAtAndExcludesFromQueries() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
 
     int updated = endpointRepository.softDelete(endpoint.id(), PROJECT_ID_A);
 
@@ -185,7 +185,7 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void softDeleteReturnsZeroForDifferentProject() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
 
     int updated = endpointRepository.softDelete(endpoint.id(), PROJECT_ID_B);
 
@@ -200,7 +200,7 @@ class EndpointRepositoryIntegrationTest {
         new WebhookEndpoint(
             null,
             projectId,
-            "https://192.0.2.40/webhook",
+            "https://8.8.8.40/webhook",
             "New endpoint",
             "encrypted-ciphertext",
             new byte[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
@@ -214,7 +214,7 @@ class EndpointRepositoryIntegrationTest {
 
     assertThat(saved.id()).isNotNull();
     assertThat(saved.projectId()).isEqualTo(projectId);
-    assertThat(saved.url()).isEqualTo("https://192.0.2.40/webhook");
+    assertThat(saved.url()).isEqualTo("https://8.8.8.40/webhook");
     assertThat(saved.enabled()).isTrue();
     assertThat(saved.createdAt()).isNotNull();
     assertThat(saved.updatedAt()).isNotNull();
@@ -222,12 +222,12 @@ class EndpointRepositoryIntegrationTest {
 
     var found = endpointRepository.findByIdAndProject(saved.id(), projectId);
     assertThat(found).isPresent();
-    assertThat(found.get().url()).isEqualTo("https://192.0.2.40/webhook");
+    assertThat(found.get().url()).isEqualTo("https://8.8.8.40/webhook");
   }
 
   @Test
   void saveUpdatesExistingEndpoint() {
-    WebhookEndpoint inserted = insertEndpoint(PROJECT_ID_A, "https://192.0.2.41/webhook", true);
+    WebhookEndpoint inserted = insertEndpoint(PROJECT_ID_A, "https://8.8.8.41/webhook", true);
 
     // Fetch the actual persisted state (DB-generated timestamps)
     WebhookEndpoint beforeUpdate =
@@ -237,7 +237,7 @@ class EndpointRepositoryIntegrationTest {
         new WebhookEndpoint(
             beforeUpdate.id(),
             beforeUpdate.projectId(),
-            "https://192.0.2.40/webhook",
+            "https://8.8.8.40/webhook",
             "Updated description",
             beforeUpdate.signingSecretCiphertext(),
             beforeUpdate.nonce(),
@@ -249,20 +249,20 @@ class EndpointRepositoryIntegrationTest {
 
     WebhookEndpoint result = endpointRepository.save(updated);
 
-    assertThat(result.url()).isEqualTo("https://192.0.2.40/webhook");
+    assertThat(result.url()).isEqualTo("https://8.8.8.40/webhook");
     assertThat(result.description()).isEqualTo("Updated description");
     assertThat(result.enabled()).isFalse();
     assertThat(result.createdAt()).isEqualTo(beforeUpdate.createdAt());
 
     var found = endpointRepository.findByIdAndProject(inserted.id(), PROJECT_ID_A);
     assertThat(found).isPresent();
-    assertThat(found.get().url()).isEqualTo("https://192.0.2.40/webhook");
+    assertThat(found.get().url()).isEqualTo("https://8.8.8.40/webhook");
     assertThat(found.get().enabled()).isFalse();
   }
 
   @Test
   void findByEndpointIdAndProjectReturnsSubscription() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
     UUID subscriptionId = UUID.randomUUID();
     jdbcTemplate.update(
         """
@@ -284,7 +284,7 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void findByEndpointIdAndProjectReturnsEmptyForDifferentProject() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
     UUID subscriptionId = UUID.randomUUID();
     jdbcTemplate.update(
         """
@@ -304,7 +304,7 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void findByEndpointIdAndEventTypeAndProjectReturnsSubscription() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
     UUID subscriptionId = UUID.randomUUID();
     jdbcTemplate.update(
         """
@@ -325,7 +325,7 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void findByEndpointIdAndEventTypeAndProjectReturnsEmptyForDifferentEventType() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
     UUID subscriptionId = UUID.randomUUID();
     jdbcTemplate.update(
         """
@@ -345,7 +345,7 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void findByEndpointIdAndProjectReturnsAllSubscriptions() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
     jdbcTemplate.update(
         """
         INSERT INTO endpoint_subscriptions (id, endpoint_id, event_type, created_at)
@@ -374,12 +374,12 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void saveInsertsNewSubscription() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
 
     EndpointSubscription toCreate =
         new EndpointSubscription(null, endpoint.id(), "payment.succeeded", null, null);
 
-    EndpointSubscription saved = subscriptionRepository.save(toCreate);
+    EndpointSubscription saved = subscriptionRepository.save(toCreate, PROJECT_ID_A);
 
     assertThat(saved.id()).isNotNull();
     assertThat(saved.endpointId()).isEqualTo(endpoint.id());
@@ -390,24 +390,24 @@ class EndpointRepositoryIntegrationTest {
 
   @Test
   void saveSubscriptionRejectsSoftDeletedEndpoint() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
     endpointRepository.softDelete(endpoint.id(), PROJECT_ID_A);
 
     EndpointSubscription toCreate =
         new EndpointSubscription(null, endpoint.id(), "payment.succeeded", null, null);
 
-    assertThatThrownBy(() -> subscriptionRepository.save(toCreate))
+    assertThatThrownBy(() -> subscriptionRepository.save(toCreate, PROJECT_ID_A))
         .isInstanceOf(IllegalStateException.class)
         .hasMessageContaining("endpoint not found or is soft-deleted");
   }
 
   @Test
   void saveSubscriptionAllowsReSubscriptionAfterSoftDelete() {
-    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://192.0.2.10/webhook", true);
+    WebhookEndpoint endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.10/webhook", true);
 
     EndpointSubscription first =
         new EndpointSubscription(null, endpoint.id(), "payment.succeeded", null, null);
-    EndpointSubscription firstSaved = subscriptionRepository.save(first);
+    EndpointSubscription firstSaved = subscriptionRepository.save(first, PROJECT_ID_A);
 
     subscriptionRepository.softDeleteByEndpointIdAndProject(endpoint.id(), PROJECT_ID_A);
 
@@ -415,10 +415,30 @@ class EndpointRepositoryIntegrationTest {
     // does not count against the partial unique index
     EndpointSubscription second =
         new EndpointSubscription(null, endpoint.id(), "payment.succeeded", null, null);
-    EndpointSubscription secondSaved = subscriptionRepository.save(second);
+    EndpointSubscription secondSaved = subscriptionRepository.save(second, PROJECT_ID_A);
 
     assertThat(secondSaved.id()).isNotEqualTo(firstSaved.id());
     assertThat(secondSaved.deletedAt()).isNull();
     assertThat(secondSaved.eventType()).isEqualTo("payment.succeeded");
+  }
+
+  @Test
+  void subscriptionWritesRequireProjectOwnership() {
+    var endpoint = insertEndpoint(PROJECT_ID_A, "https://8.8.8.8/scoped", true);
+    var subscription = new EndpointSubscription(null, endpoint.id(), "scope.event", null, null);
+    assertThatThrownBy(() -> subscriptionRepository.save(subscription, PROJECT_ID_B))
+        .isInstanceOf(IllegalStateException.class);
+    var saved = subscriptionRepository.save(subscription, PROJECT_ID_A);
+    var changed =
+        new EndpointSubscription(
+            saved.id(), saved.endpointId(), "changed.event", saved.createdAt(), null);
+    assertThatThrownBy(() -> subscriptionRepository.save(changed, PROJECT_ID_B))
+        .isInstanceOf(IllegalStateException.class);
+    assertThat(
+            subscriptionRepository
+                .findByIdAndEndpointIdAndProject(saved.id(), endpoint.id(), PROJECT_ID_A)
+                .orElseThrow()
+                .eventType())
+        .isEqualTo("scope.event");
   }
 }
