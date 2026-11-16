@@ -1,0 +1,743 @@
+{
+  "info": {
+    "name": "HookRelay Smoke Tests",
+    "_postman_id": "hookrelay-smoke-tests-collection",
+    "description": "Lightweight smoke test suite for HookRelay deployment verification.\n\nCovers: application health, authentication, endpoint CRUD, event ingestion, tenant isolation, and invalid-request handling.\n\nDesigned to be idempotent: safe to run repeatedly against the same development environment without creating uncontrolled duplicate resources or modifying customer data.\n\nPrerequisites:\n- HookRelay backend running at {{base_url}}\n- Valid API key set in {{api_key}}\n- Project ID set in {{project_id}}\n\nDo NOT run against production without explicit authorization.",
+    "schema": "https://schema.postman.com/collection/json/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Health Check",
+      "item": [
+        {
+          "name": "Smoke: Application health check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/actuator/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "description": "Verifies the HookRelay application is running and healthy."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Application status is UP\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(\"UP\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Authentication",
+      "item": [
+        {
+          "name": "Smoke: Valid API key creates endpoint",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://smoke-test.example.com/webhook\",\n  \"description\": \"Smoke test endpoint - do not delete\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints"
+              ]
+            },
+            "description": "Creates a smoke test endpoint with a valid API key. Expects 201 Created. If the endpoint already exists (409), the next request will find it via list."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 201 or 409\", function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([201, 409]);",
+                  "});",
+                  "",
+                  "if (pm.response.code === 201) {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json).to.have.property(\"id\");",
+                  "    pm.expect(json.url).to.equal(\"https://smoke-test.example.com/webhook\");",
+                  "    pm.collectionVariables.set(\"smokeEndpointId\", json.id);",
+                  "    pm.test(\"Created endpoint has expected URL\", function () {",
+                  "        pm.expect(json.url).to.equal(\"https://smoke-test.example.com/webhook\");",
+                  "    });",
+                  "} else if (pm.response.code === 409) {",
+                  "    pm.test(\"Endpoint already exists (idempotent re-run)\", function () {",
+                  "        pm.expect(true).to.be.true;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Missing authentication rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://smoke-test.example.com/webhook\",\n  \"description\": \"No auth test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints"
+              ]
+            },
+            "description": "Verifies requests without X-Api-Key are rejected. Expects 401 Unauthorized."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 401\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Endpoint CRUD",
+      "item": [
+        {
+          "name": "Smoke: List endpoints and resolve test endpoint ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints?page=0&size=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Lists endpoints and resolves the smoke test endpoint ID if it already exists from a previous run."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.expect(json).to.have.property(\"endpoints\");",
+                  "pm.expect(json.endpoints).to.be.an(\"array\");",
+                  "",
+                  "// Resolve smoke test endpoint ID if not already set or if previous run created one",
+                  "if (!pm.collectionVariables.get(\"smokeEndpointId\")) {",
+                  "    var smokeEndpoint = json.endpoints.find(function (e) {",
+                  "        return e.url === \"https://smoke-test.example.com/webhook\";",
+                  "    });",
+                  "    if (smokeEndpoint) {",
+                  "        pm.collectionVariables.set(\"smokeEndpointId\", smokeEndpoint.id);",
+                  "        pm.test(\"Resolved existing smoke test endpoint ID\", function () {",
+                  "            pm.expect(smokeEndpoint.id).to.not.be.empty;",
+                  "        });",
+                  "    }",
+                  "}",
+                  "",
+                  "pm.test(\"All endpoints belong to the authenticated project\", function () {",
+                  "    json.endpoints.forEach(function (e) {",
+                  "        pm.expect(e.projectId).to.equal(pm.environment.get(\"project_id\"));",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Get endpoint by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}"
+              ]
+            },
+            "description": "Retrieves the smoke test endpoint by ID. Expects 200 OK."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Response has expected endpoint ID\", function () {",
+                  "    pm.expect(json.id).to.equal(pm.collectionVariables.get(\"smokeEndpointId\"));",
+                  "});",
+                  "",
+                  "pm.test(\"Response has expected URL\", function () {",
+                  "    pm.expect(json.url).to.equal(\"https://smoke-test.example.com/webhook\");",
+                  "});",
+                  "",
+                  "pm.test(\"Response does not expose signing secret\", function () {",
+                  "    pm.expect(json).to.not.have.property(\"signingSecretCiphertext\");",
+                  "    pm.expect(json).to.not.have.property(\"signingSecret\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Update endpoint (toggle description and enabled)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://smoke-test.example.com/webhook\",\n  \"description\": \"Smoke test endpoint - updated\",\n  \"enabled\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}"
+              ]
+            },
+            "description": "Updates the smoke test endpoint. Expects 200 OK."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Response has updated description\", function () {",
+                  "    pm.expect(json.description).to.equal(\"Smoke test endpoint - updated\");",
+                  "});",
+                  "",
+                  "pm.test(\"Response has enabled true\", function () {",
+                  "    pm.expect(json.enabled).to.equal(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Enable endpoint",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}/enable",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}",
+                "enable"
+              ]
+            },
+            "description": "Enables the smoke test endpoint. Expects 200 OK."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response body is empty\", function () {",
+                  "    pm.expect(pm.response.text()).to.equal(\"\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Disable endpoint",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/{{smokeEndpointId}}/disable",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "{{smokeEndpointId}}",
+                "disable"
+              ]
+            },
+            "description": "Disables the smoke test endpoint. Expects 200 OK."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test(\"Response body is empty\", function () {",
+                  "    pm.expect(pm.response.text()).to.equal(\"\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Event Ingestion",
+      "item": [
+        {
+          "name": "Smoke: Ingest event successfully",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "smoke-event-001"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": {\n    \"paymentId\": \"pay_smoke_001\",\n    \"amount\": 4999,\n    \"currency\": \"INR\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "events"
+              ]
+            },
+            "description": "Ingests a smoke test event. Expects 202 Accepted."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 202\", function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "",
+                  "var json = pm.response.json();",
+                  "pm.test(\"Response has eventId\", function () {",
+                  "    pm.expect(json).to.have.property(\"eventId\");",
+                  "    pm.expect(json.eventId).to.not.be.empty;",
+                  "    pm.collectionVariables.set(\"smokeEventId\", json.eventId);",
+                  "});",
+                  "",
+                  "pm.test(\"Response has status ACCEPTED\", function () {",
+                  "    pm.expect(json.status).to.equal(\"ACCEPTED\");",
+                  "});",
+                  "",
+                  "pm.test(\"Idempotent-Replayed header is boolean\", function () {",
+                  "    var replayed = pm.response.headers.get(\"Idempotent-Replayed\");",
+                  "    pm.expect(replayed).to.be.oneOf([\"true\", \"false\"]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Idempotency replay (same key, same payload)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "smoke-event-001"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"eventType\": \"payment.succeeded\",\n  \"data\": {\n    \"paymentId\": \"pay_smoke_001\",\n    \"amount\": 4999,\n    \"currency\": \"INR\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "events"
+              ]
+            },
+            "description": "Replays the same event with the same idempotency key. Expects 202 Accepted with Idempotent-Replayed: true."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 202\", function () {",
+                  "    pm.response.to.have.status(202);",
+                  "});",
+                  "",
+                  "pm.test(\"Idempotent-Replayed header is true\", function () {",
+                  "    pm.expect(pm.response.headers.get(\"Idempotent-Replayed\")).to.equal(\"true\");",
+                  "});",
+                  "",
+                  "pm.test(\"Response has same eventId as original\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.eventId).to.equal(pm.collectionVariables.get(\"smokeEventId\"));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Tenant Isolation",
+      "item": [
+        {
+          "name": "Smoke: Cross-project access denied",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints/00000000-0000-0000-0000-000000000000",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints",
+                "00000000-0000-0000-0000-000000000000"
+              ]
+            },
+            "description": "Verifies cross-project access is denied. Expects 404 Not Found (no information leakage)."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 404\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "pm.test(\"Response does not leak tenant information\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(404);",
+                  "    var body = pm.response.text();",
+                  "    pm.expect(body).to.not.contain(\"project\");",
+                  "    pm.expect(body).to.not.contain(\"organization\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Invalid Request Handling",
+      "item": [
+        {
+          "name": "Smoke: Blank URL rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"\",\n  \"description\": \"Blank URL test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints"
+              ]
+            },
+            "description": "Verifies blank URL is rejected. Expects 400 Bad Request."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(400);",
+                  "    pm.expect(json.title).to.equal(\"Bad Request\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Smoke: Non-HTTPS URL rejected",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Api-Key",
+                "value": "{{api_key}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"http://example.com/webhook\",\n  \"description\": \"Non-HTTPS test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/v1/endpoints",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "v1",
+                "endpoints"
+              ]
+            },
+            "description": "Verifies non-HTTPS URLs are rejected. Expects 400 Bad Request."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status code is 400\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test(\"Response is ProblemDetail\", function () {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.status).to.equal(400);",
+                  "    pm.expect(json.title).to.equal(\"Bad Request\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "api_key",
+      "value": "PLACEHOLDER_DEV_API_KEY",
+      "type": "string"
+    },
+    {
+      "key": "project_id",
+      "value": "PLACEHOLDER_PROJECT_ID",
+      "type": "string"
+    },
+    {
+      "key": "smokeEndpointId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "smokeEventId",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}
