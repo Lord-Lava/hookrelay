@@ -122,11 +122,16 @@ public class WebhookEndpointRepository {
         jdbcTemplate.update(
             """
             UPDATE endpoints
-            SET url = ?, description = ?, enabled = ?, updated_at = now()
+            SET url = ?, description = ?, signing_secret_ciphertext = ?,
+                signing_secret_nonce = ?, signing_secret_key_version = ?,
+                enabled = ?, updated_at = now()
             WHERE id = ? AND project_id = ? AND deleted_at IS NULL
             """,
             endpoint.url(),
             endpoint.description(),
+            endpoint.signingSecretCiphertext(),
+            endpoint.nonce(),
+            endpoint.keyVersion(),
             endpoint.enabled(),
             endpoint.id(),
             endpoint.projectId());

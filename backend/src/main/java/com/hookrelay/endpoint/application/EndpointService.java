@@ -6,22 +6,32 @@ import com.hookrelay.security.SigningSecretService;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class EndpointService {
 
   private final WebhookEndpointRepository endpointRepository;
   private final SigningSecretService signingSecretService;
+  private final JdbcTemplate jdbcTemplate;
+  private final ObjectMapper objectMapper;
 
   public EndpointService(
-      WebhookEndpointRepository endpointRepository, SigningSecretService signingSecretService) {
+      WebhookEndpointRepository endpointRepository,
+      SigningSecretService signingSecretService,
+      JdbcTemplate jdbcTemplate,
+      ObjectMapper objectMapper) {
     this.endpointRepository = endpointRepository;
     this.signingSecretService = signingSecretService;
+    this.jdbcTemplate = jdbcTemplate;
+    this.objectMapper = objectMapper;
   }
 
   /**
@@ -201,6 +211,66 @@ public class EndpointService {
         endpoint.signingSecretCiphertext(), endpoint.nonce(), endpoint.keyVersion());
   }
 
+  /**
+   * Rotates the signing secret for an endpoint atomically. Generates a fresh secret, encrypts it,
+   * and persists the new ciphertext/nonce/key version in the same transaction as an audit event.
+   * The plaintext secret is returned once; subsequent reads never expose it.
+   */
+  @Transactional
+  public RotateSecretResult rotateSigningSecret(UUID id, UUID projectId) {
+    if (!signingSecretService.isConfigured()) {
+      throw new IllegalStateException("Signing secret encryption is not configured");
+    }
+
+    WebhookEndpoint existing = getEndpoint(id, projectId);
+
+    String plaintextSecret = signingSecretService.generateSecret();
+    SigningSecretService.EncryptedSecret encrypted = signingSecretService.encrypt(plaintextSecret);
+
+    WebhookEndpoint updated =
+        new WebhookEndpoint(
+            existing.id(),
+            existing.projectId(),
+            existing.url(),
+            existing.description(),
+            encrypted.ciphertext(),
+            encrypted.nonce(),
+            encrypted.keyVersion(),
+            existing.enabled(),
+            existing.createdAt(),
+            Instant.now(),
+            existing.deletedAt());
+    try {
+      endpointRepository.save(updated);
+    } catch (DataIntegrityViolationException exception) {
+      throw new EndpointAlreadyExistsException("Endpoint rotation conflict for: " + id, exception);
+    }
+
+    // Record audit event without storing any secret material.
+    recordSecretRotationAudit(projectId, id);
+
+    return new RotateSecretResult(updated, plaintextSecret);
+  }
+
+  private void recordSecretRotationAudit(UUID projectId, UUID endpointId) {
+    try {
+      String payload =
+          objectMapper.writeValueAsString(
+              new SecretRotationAuditEvent(endpointId, "SECRET_ROTATED", Instant.now()));
+      jdbcTemplate.update(
+          """
+          INSERT INTO outbox_messages (id, project_id, aggregate_id, message_type, payload)
+          VALUES (?, ?, ?, 'SECRET_ROTATED', ?::jsonb)
+          """,
+          UUID.randomUUID(),
+          projectId,
+          endpointId,
+          payload);
+    } catch (Exception exception) {
+      throw new IllegalStateException("Failed to record secret rotation audit event", exception);
+    }
+  }
+
   private void validateUrlHost(String url) {
     try {
       URI uri = URI.create(url);
@@ -234,4 +304,10 @@ public class EndpointService {
 
   /** Holds the result of creating an endpoint, including the plaintext signing secret. */
   public record CreatedEndpointResult(WebhookEndpoint endpoint, String signingSecret) {}
+
+  /** Holds the result of rotating a signing secret, including the new plaintext secret. */
+  public record RotateSecretResult(WebhookEndpoint endpoint, String signingSecret) {}
+
+  /** Audit event payload for secret rotation - contains no secret material. */
+  private record SecretRotationAuditEvent(UUID endpointId, String eventType, Instant timestamp) {}
 }

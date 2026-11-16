@@ -90,6 +90,22 @@ public class EndpointController {
     return ResponseEntity.noContent().build();
   }
 
+  @PostMapping("/{endpointId}/rotate-secret")
+  public ResponseEntity<RotateSecretResponse> rotateSecret(@PathVariable UUID endpointId) {
+    UUID projectId = TenantContext.require().projectId();
+    EndpointService.RotateSecretResult result =
+        endpointService.rotateSigningSecret(endpointId, projectId);
+    WebhookEndpoint endpoint = result.endpoint();
+    return ResponseEntity.ok(
+        new RotateSecretResponse(
+            endpoint.id(),
+            endpoint.projectId(),
+            endpoint.url(),
+            result.signingSecret(),
+            endpoint.enabled(),
+            endpoint.updatedAt()));
+  }
+
   private CreatedEndpointResponse toCreatedResponse(EndpointService.CreatedEndpointResult result) {
     WebhookEndpoint endpoint = result.endpoint();
     return new CreatedEndpointResponse(
