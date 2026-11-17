@@ -82,7 +82,7 @@ jobs:
         if: always()
         with:
           name: dependency-reports
-          path: backend/build/reports/dependency-check-report.*
+          path: backend/build/reports/dependency-check/
           retention-days: 14
   static-analysis:
     runs-on: ubuntu-24.04
