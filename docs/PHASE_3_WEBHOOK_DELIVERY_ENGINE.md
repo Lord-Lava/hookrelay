@@ -43,37 +43,39 @@ Existing OutboxPublisher
        |
        v
 RabbitMQ: EVENT_INGESTED
-       |
-       v
+        |
+        v
 Event Consumer
-       |
-       v
+        |
+        v
 Subscription Fan-out
-       |
-       v
-PostgreSQL: deliveries
-       |
-       v
+        |
+        v
+PostgreSQL: deliveries (existing V1 table)
+        |
+        v
 Delivery Dispatcher
-       |
-       v
+        |
+        v
 SSRF-Safe HTTPS Client
-       |
-       v
+        |
+        v
 Customer Webhook Endpoint
-       |
-       +-- 2xx --> DELIVERED
-       |
-       +-- Transient failure --> RETRY_SCHEDULED
-       |
-       +-- Permanent/exhausted --> DEAD_LETTERED
-       |
-       +-- Manual replay --> PENDING
+        |
+        +-- 2xx --> DELIVERED
+        |
+        +-- Transient failure --> RETRY_SCHEDULED
+        |
+        +-- Permanent/exhausted --> DEAD_LETTERED
+        |
+        +-- Manual replay --> PENDING
 ```
 
 PostgreSQL remains the source of truth for delivery status, attempt history and scheduled retries.
 
 RabbitMQ handles event-consumer work distribution. The delivery dispatcher initially polls PostgreSQL for due work rather than introducing a second RabbitMQ delivery-job queue.
+
+Migration version numbers follow the existing sequential convention starting at `V8`.
 
 All asynchronous processing provides at-least-once semantics.
 
@@ -112,7 +114,7 @@ Understand the existing code and establish Phase 3 contracts before modifying pr
 >
 > Review current official documentation before adding dependencies or using framework APIs. Preserve compatible versions and existing architectural conventions.
 >
-> Create `docs/PHASE_3_DELIVERY_ENGINE.md` containing the architecture, decisions, risks and phased implementation plan.
+> Create `docs/PHASE_3_WEBHOOK_DELIVERY_ENGINE.md` containing the architecture, decisions, risks and phased implementation plan.
 >
 > Do not implement the delivery engine in this step.
 >
@@ -141,37 +143,46 @@ Create the durable foundation for individual webhook deliveries and attempts.
 
 ### Proposed persistence concepts
 
-**`webhook_deliveries`**
+Phase 3 reuses the existing V1 `deliveries` and `delivery_attempts` tables via forward-only migrations starting at `V8`, rather than introducing duplicate `webhook_deliveries` / `webhook_delivery_attempts` tables.
 
-- `id`
-- `project_id`
-- `event_id`
-- `endpoint_id`
-- `status`
-- `attempt_count`
-- `next_attempt_at`
-- `lease_owner`
-- `lease_token`
-- `lease_expires_at`
-- `last_error_code`
-- `delivered_at`
-- `created_at`
-- `updated_at`
+**`deliveries` (V1, extended by V8)**
 
-**`webhook_delivery_attempts`**
+- `id` (existing PK)
+- `project_id` (V8: added UUID, FK to projects, NOT NULL) — enables tenant-scoped delivery queries without joining through events or endpoints
+- `event_id` (existing FK to events)
+- `endpoint_id` (existing FK to endpoints)
+- `status` (existing)
+- `attempt_count` (existing)
+- `next_attempt_at` (existing)
+- `lease_owner` (V8: added text) — worker lease ownership
+- `lease_token` (V8: added text) — fencing token to prevent stale workers overwriting newer state
+- `lease_expires_at` (V8: added timestamptz) — lease expiry for crash recovery
+- `last_error_code` (V8: added text)
+- `delivered_at` (V8: added timestamptz)
+- `created_at` (existing)
+- `updated_at` (existing)
 
-- `id`
-- `delivery_id`
-- `attempt_number`
-- `started_at`
-- `completed_at`
-- `http_status`
-- `duration_ms`
-- `error_category`
-- `response_preview` (bounded and sanitized)
-- `outcome`
+Constraints added by migration:
+- Foreign key to the existing `projects` table.
+- Existing `UNIQUE (event_id, endpoint_id)` preserves exactly one delivery per event/endpoint pair.
+- Index on `(status, next_attempt_at)` for due-delivery polling (extends V1's `idx_deliveries_due`).
+- Index on `(project_id, status)` for tenant-scoped listing.
 
-Include constraints, indexes, foreign keys and retention considerations. Preserve the existing migration history.
+**`delivery_attempts` (V1)**
+
+- `id` (existing PK)
+- `delivery_id` (existing FK to deliveries)
+- `attempt_number` (existing)
+- `started_at` (existing)
+- `completed_at` (existing)
+- `http_status` (existing)
+- `duration_ms` (existing)
+- `error_category` (V8: added text)
+- `response_preview` (V8: added text, bounded and sanitized)
+- `outcome` (V8: added text)
+- `attempted_at` (existing)
+
+Preserve historical delivery references when endpoints are soft-deleted (endpoints use `deleted_at`, not cascade delete).
 
 ### Coding-agent prompt
 
@@ -282,7 +293,7 @@ Registration-time SSRF validation is insufficient. The actual network connection
 >
 > First, investigate the existing Java HTTP client options and verify which can safely bind outbound connections to validated DNS answers while preserving TLS hostname verification.
 >
-> Apache HttpClient 5 with a carefully configured custom DNS resolver/connection manager is an option, but do not assume its default configuration is sufficient.
+> This project standardizes on Spring Boot 4's `RestClient` for synchronous outbound HTTP (AGENTS.md §3.3). However, `RestClient` delegates to the JDK `HttpClient` by default, which does not expose per-connection DNS answer pinning or the ability to reject mixed public/private DNS results at the socket layer. Because connection-time SSRF enforcement is a hard security requirement, introduce Apache HttpClient 5 with a carefully configured custom DNS resolver and connection manager as the outbound transport — do not assume its default configuration is sufficient. Document why `RestClient`/JDK `HttpClient` cannot satisfy the pin-and-connect requirement and why Apache HttpClient 5 is justified here.
 >
 > Requirements:
 >
@@ -338,7 +349,7 @@ HookRelay-Timestamp: 1790000000
 HookRelay-Signature: v1=<hmac>
 ```
 
-Document the exact byte-level canonical string before implementation. Generate a fresh timestamp and signature on each attempt. Standard Webhooks conventions are worth evaluating before finalizing a proprietary protocol.
+`HookRelay-Timestamp` is a Unix epoch-seconds integer (not milliseconds), consistent with AGENTS.md §11 unit-in-name guidance. Document the exact byte-level canonical string before implementation. Generate a fresh timestamp and signature on each attempt. Standard Webhooks conventions are worth evaluating before finalizing a proprietary protocol.
 
 ### Coding-agent prompt
 
@@ -770,7 +781,7 @@ Phase 3 is complete when:
 
 - [ ] Events fan out reliably to subscribed endpoints.
 - [ ] Every delivery and attempt has durable database state.
-- [ ] Duplicate mesages cannot create duplicate initial delivery records.
+- [ ] Duplicate messages cannot create duplicate initial delivery records.
 - [ ] HTTPS request use validated, pinned destinations and proper TLS hostname verification.
 - [ ] Each webhook is signed using the documented protocol.
 - [ ] Multiple workers can process deliveries safely.
