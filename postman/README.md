@@ -17,7 +17,7 @@ python3 scripts/verify-compose.py --image hookrelay-review:local --newman newman
 
 The runner starts a uniquely named disposable Compose project with PostgreSQL and
 RabbitMQ, checks the built application's health and API behavior, and seeds two
-projects with randomly generated credentials. It runs smoke twice and comprehensive
+projects with randomly generated credentials. It runs smoke once and comprehensive
 once, failing on any assertion. It always removes its own containers and volumes.
 It does not access the normal development Compose project. Credentials live only
 in mode-0600 temporary files and are removed on exit.
