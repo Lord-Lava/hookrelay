@@ -1,6 +1,7 @@
 package com.hookrelay.event.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.hookrelay.auth.ApiKeyAuthService;
 import com.hookrelay.event.api.CreateEventRequest;
@@ -286,6 +287,14 @@ class EventIngestionIntegrationTest {
                   projectId))
           .isEqualTo(1);
     }
+  }
+
+  @Test
+  void rejectsNulBytesInPayload() throws Exception {
+    var request = buildRequest("payment.succeeded", new PaymentPayload("\u0000", 1));
+    assertThatThrownBy(() -> eventIngestionService.accept(projectId, request, "idem-nul"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Request data must not contain NUL bytes");
   }
 
   private record PaymentPayload(String paymentId, int amount) {}

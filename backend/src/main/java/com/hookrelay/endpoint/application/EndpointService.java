@@ -69,6 +69,7 @@ public class EndpointService {
             null,
             null,
             null);
+    requireNoNullBytes(description);
     try {
       WebhookEndpoint saved = endpointRepository.save(endpoint);
       return new CreatedEndpointResult(saved, plaintextSecret);
@@ -110,12 +111,14 @@ public class EndpointService {
 
     if (Boolean.TRUE.equals(enabled)) requireSecret(existing);
     String resolvedUrl = url != null ? url : existing.url();
+    String resolvedDescription = description != null ? description : existing.description();
+    requireNoNullBytes(resolvedDescription);
     WebhookEndpoint updated =
         new WebhookEndpoint(
             existing.id(),
             existing.projectId(),
             resolvedUrl,
-            description != null ? description : existing.description(),
+            resolvedDescription,
             existing.signingSecretCiphertext(),
             existing.nonce(),
             existing.keyVersion(),
@@ -241,6 +244,12 @@ public class EndpointService {
         || endpoint.nonce() == null
         || endpoint.keyVersion() == null)
       throw new IllegalArgumentException("Rotate the signing secret before enabling this endpoint");
+  }
+
+  private static void requireNoNullBytes(String value) {
+    if (value != null && value.indexOf('\u0000') >= 0) {
+      throw new IllegalArgumentException("Value must not contain NUL bytes");
+    }
   }
 
   private void recordSecretRotationAudit(UUID projectId, UUID endpointId) {

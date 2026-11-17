@@ -24,6 +24,8 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 20)
 public class RequestBodySizeLimitFilter extends OncePerRequestFilter {
+  private static final int DEFAULT_READ_TIMEOUT_MILLIS = 10_000;
+
   private final ObjectMapper objectMapper;
   private final int maxRequestBytes;
 

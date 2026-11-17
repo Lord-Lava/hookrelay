@@ -46,6 +46,7 @@ public class EventIngestionService {
     validateIdempotencyKey(idempotencyKey);
 
     JsonNode canonicalData = canonicalize(request.data());
+    requireNoNullBytes(canonicalData);
     String payloadJson = writeJson(canonicalData);
     if (payloadJson.getBytes(StandardCharsets.UTF_8).length > maxPayloadBytes) {
       throw new IllegalArgumentException(
@@ -154,6 +155,15 @@ public class EventIngestionService {
   private boolean constantTimeEquals(String left, String right) {
     return java.security.MessageDigest.isEqual(
         left.getBytes(StandardCharsets.US_ASCII), right.getBytes(StandardCharsets.US_ASCII));
+  }
+
+  private static void requireNoNullBytes(JsonNode node) {
+    if (node.isTextual() && node.asString().indexOf('\u0000') >= 0) {
+      throw new IllegalArgumentException("Request data must not contain NUL bytes");
+    }
+    if (node.isObject() || node.isArray()) {
+      node.forEach(EventIngestionService::requireNoNullBytes);
+    }
   }
 
   private record EventRow(UUID id, Instant createdAt, String fingerprint) {}

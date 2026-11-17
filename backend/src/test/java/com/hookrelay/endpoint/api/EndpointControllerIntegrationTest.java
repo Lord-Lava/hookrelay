@@ -551,4 +551,31 @@ class EndpointControllerIntegrationTest {
       jdbcTemplate.execute("ALTER TABLE endpoint_audit_events DROP CONSTRAINT test_reject_audit");
     }
   }
+
+  @Test
+  void createEndpointRejectsDescriptionWithNulBytes() {
+    assertThatThrownBy(() ->
+            endpointService.createEndpoint(
+                projectId, "https://8.8.8.11/webhook", "desc\u0000with null"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Value must not contain NUL bytes");
+  }
+
+  @Test
+  void createEndpointRejectsUrlOverByteLimit() {
+    String overLimitUrl = "https://8.8.8.11/" + "a".repeat(2001) + "/webhook";
+    assertThatThrownBy(() -> endpointService.createEndpoint(projectId, overLimitUrl, "desc"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("URL must not exceed 2000 UTF-8 bytes");
+  }
+
+  @Test
+  void updateEndpointRejectsDescriptionWithNulBytes() {
+    var created = endpointService.createEndpoint(projectId, "https://8.8.8.12/webhook", "desc");
+    assertThatThrownBy(() ->
+            endpointService.updateEndpoint(
+                created.endpoint().id(), projectId, null, "desc\u0000null", null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Value must not contain NUL bytes");
+  }
 }
