@@ -1,7 +1,864 @@
-# Phase 3 — Webhook delivery engine architecture
+# HookRelay — Phase 3: Reliable Webhook Delivery Engine
 
-Status: design only; reconciled on 2026-11-18 against commit `1e22357`.
-This replaces the earlier implementation-prompt outline. No consumer, dispatcher,
+## How to use this document
+
+This document retains the original Steps 0–10 coding-agent prompts, final audit
+prompt and Definition of Done. The completed Step 0 architecture is preserved in
+[Architecture reference](#architecture-reference) below, reconciled against `1e22357`
+on 2026-11-18 and integrated into these prompts on 2026-11-19.
+
+Step 0 is complete as a design exercise; Steps 1–10 remain implementation work.
+Use the numbered prompts as the implementation sequence and the reference as their
+shared technical contract. Read the reference before executing a prompt; the prompt
+links identify the sections most relevant to that step. Preserve both parts when
+updating this document. Proposed defaults are design decisions, not shipped behavior.
+
+Do not enable outbound customer traffic before the transport, signing, lease/retry,
+endpoint lifecycle and admission-control gates are verified. Steps 5–6 may exercise
+workers with controlled receivers; later operational steps do not justify omitting
+basic safety controls from the initial worker.
+
+## Objective
+
+Build the complete outbound webhook delivery system for HookRelay using the existing Java/Spring Boot, PostgreSQL and RabbitMQ infrastructure.
+
+A customer must be able to publish an event to HookRelay and have that event reliably delivered as an authenticated HTTPS POST to every eligible subscribed endpoint.
+
+The system must support durable delivery state, HMAC signatures, at-least-once delivery, retry scheduling, dead-lettering, manual replay, observability and tenant isolation.
+
+**Phase 3 explicitly excludes the Next.js dashboard, payments, subscriptions/billing, SDK development, and production deployment.**
+
+### Existing foundation
+
+Source inspection for Step 0 confirmed the following existing foundation:
+
+- Project-scoped API-key authentication.
+- Event ingestion with idempotency.
+- PostgreSQL event persistence.
+- Transactional outbox publisher.
+- RabbitMQ publishing with publisher confirms.
+- Webhook endpoint CRUD and subscriptions.
+- Signing-secret encryption and rotation.
+- Registration-time SSRF validation.
+- Tenant isolation, API rate limiting and request-size limits.
+
+The architecture reference records the actual limitations, schema and code paths. Recheck the repository before implementation; this list is not evidence of runtime security verification.
+
+### Architecture to implement
+
+```text
+Client Application
+       |
+       v
+Event Ingestion API
+       |
+       v
+PostgreSQL
+  events + outbox
+       |
+       v
+Existing OutboxPublisher
+       |
+       v
+RabbitMQ: events.ingested notification
+        |
+        v
+Event Consumer
+        |
+        v
+Subscription Fan-out
+        |
+        v
+PostgreSQL: deliveries (existing V1 table)
+        |
+        v
+Delivery Dispatcher
+        |
+        v
+SSRF-Safe HTTPS Client
+        |
+        v
+Customer Webhook Endpoint
+        |
+        +-- 2xx --> DELIVERED
+        |
+        +-- Transient failure --> RETRY_SCHEDULED
+        |
+        +-- Permanent/exhausted --> DEAD_LETTERED
+        |
+        +-- Manual replay --> PENDING
+```
+
+PostgreSQL remains the source of truth for delivery status, attempt history and scheduled retries.
+
+RabbitMQ handles event-consumer work distribution. The delivery dispatcher initially polls PostgreSQL for due work rather than introducing a second RabbitMQ delivery-job queue.
+
+Migration version numbers follow the existing sequential convention starting at `V8`.
+
+All asynchronous processing provides at-least-once semantics.
+
+---
+
+# Step 0 — Architecture Inspection and Design Decisions
+
+### Goal
+
+Understand the existing code and establish Phase 3 contracts before modifying production functionality.
+
+### Coding-agent prompt
+
+> Act as a principal backend architect preparing HookRelay for Phase 3.
+>
+> Read and follow [the full Architecture reference](#architecture-reference) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read `AGENTS.md`, the root-level `HOOKRELAY_OVERVIEW.md`, `docs/architecture.md`, `docs/openapi.yaml`, and all relevant existing application code.
+>
+> Inspect the existing event ingestion API, transactional outbox, RabbitMQ publisher, authentication, endpoint repositories, subscription logic, signing-secret encryption and SSRF policy.
+>
+> Document the actual implemented architecture, including database schema, event message format, queue topology, acknowledgements, configuration and package boundaries.
+>
+> Decide and document:
+>
+> 1. Delivery states and legal transitions.
+> 2. Delivery uniqueness and idempotent fan-out rules.
+> 3. Subscription selection semantics. For the MVP, prefer a snapshot of eligible active subscriptions at the first committed fan-out transaction. Clearly document that this snapshot occurs at fan-out processing time, not necessarily at ingestion time.
+> 4. PostgreSQL-based delivery job scheduling.
+> 5. Lease expiry and crash recovery.
+> 6. HTTP timeout and retry policies.
+> 7. Customer-visible DLQ versus RabbitMQ's internal dead-letter queue.
+> 8. Webhook signing protocol and rotation semantics.
+> 9. Endpoint deletion/disable behaviour.
+> 10. Tenant isolation and data retention.
+>
+> Identify all existing code that can be reused and all necessary forward-only migrations.
+>
+> Review current official documentation before adding dependencies or using framework APIs. Preserve compatible versions and existing architectural conventions.
+>
+> Update the Architecture reference in `docs/PHASE_3_WEBHOOK_DELIVERY_ENGINE.md` with the architecture, decisions, risks and phased implementation plan. Preserve all step prompts, the final audit prompt and Definition of Done; reconcile their wording with the decisions instead of replacing the document.
+>
+> Do not implement the delivery engine in this step.
+>
+> Report important design uncertainties and any blockers.
+
+**Acceptance:** The plan is reconciled with the actual repository, and the implementation approach is documented without introducing functional changes.
+
+---
+
+# Step 1 — Delivery Domain, State Machine and Persistence
+
+### Goal
+
+Create the durable foundation for individual webhook deliveries and attempts.
+
+### Selected delivery states
+
+| State             | Meaning                                               |
+| ----------------- | ----------------------------------------------------- |
+| `PENDING`         | Created, awaiting first attempt                       |
+| `IN_PROGRESS`     | Claimed by a delivery worker                          |
+| `RETRY_SCHEDULED` | Waiting for the next attempt                          |
+| `DELIVERED`       | Remote endpoint returned a successful response        |
+| `DEAD_LETTERED`   | Delivery permanently failed or exhausted retry policy |
+| `CANCELLED`       | Delivery intentionally stopped                        |
+
+### Planned persistence changes
+
+Phase 3 reuses the existing V1 `deliveries` and `delivery_attempts` tables via forward-only migrations starting at `V8`, rather than introducing duplicate `webhook_deliveries` / `webhook_delivery_attempts` tables.
+
+**`deliveries` (V1, extended by V8)**
+
+- `id` (existing PK)
+- `project_id` (V8: added nullable UUID; backfilled and constrained in V10) — enables explicit tenant-scoped delivery queries and composite ownership FKs
+- `event_id` (existing FK to events)
+- `endpoint_id` (existing FK to endpoints)
+- `status` (existing)
+- `attempt_count` (existing)
+- `next_attempt_at` (existing)
+- `lease_owner` (V8: added text) — worker lease ownership
+- `lease_token` (V8: added UUID) — fresh random token per claim, fencing stale completion
+- `lease_expires_at` (V8: added timestamptz) — lease expiry for crash recovery
+- `last_error_code` (V8: added text)
+- Terminal timestamp, captured `destination_url`, cycle number/count/start/deadline and policy version/limits (V8 additions; see the complete migration plan)
+- `created_at` (existing)
+- `updated_at` (existing)
+
+Constraints/indexes are staged through V10–V11 after backfill and validation:
+
+- Foreign key to `projects` and composite project/resource FKs proving event/endpoint ownership.
+- Existing `UNIQUE (event_id, endpoint_id)` preserves exactly one delivery per event/endpoint pair.
+- Tenant-scoped due ordering and expired-lease partial indexes (extend V1's `idx_deliveries_due`).
+- Project/status/time/ID history and endpoint/nonterminal lookup indexes.
+
+**`delivery_attempts` (V1, extended by V8)**
+
+- `id` (existing PK)
+- `delivery_id` (existing FK to deliveries)
+- `attempt_number` (existing)
+- `started_at` (V8: added; backfill from existing `attempted_at`)
+- `completed_at` (V8: added)
+- `http_status` (existing)
+- `duration_ms` (existing)
+- `error_category` (V8: added text)
+- `response_body` (existing nullable TEXT; write NULL for MVP, no response-preview capture by default)
+- `error_code` (existing)
+- `project_id`, `cycle_number`, `lease_token` (V8 additions)
+- `outcome` (V8: added text)
+- `attempted_at` (existing)
+
+V9 adds `event_fanouts`, `delivery_cycles` and project/endpoint dispatch controls.
+The abbreviated lists above are not standalone migration specifications; use
+[the complete staged migration and retention plan](#10-decision-schema-evolution-and-retention).
+V1 does not contain attempt start/completion timestamps or delivery leases.
+
+Preserve historical delivery references when endpoints are soft-deleted (endpoints use `deleted_at`, not cascade delete).
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 1: delivery domain modelling and persistence.
+>
+> Read and follow [state machine and staged schema decisions](#10-decision-schema-evolution-and-retention) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read `AGENTS.md`, root `HOOKRELAY_OVERVIEW.md` and `docs/PHASE_3_WEBHOOK_DELIVERY_ENGINE.md`. Inspect existing migrations, database conventions, and repository patterns.
+>
+> Implement the durable delivery and delivery-attempt models using the project's established JDBC/transaction approach.
+>
+> Requirements:
+>
+> - Explicit delivery state machine and valid transitions.
+> - Exactly one initial delivery per event/endpoint pair, enforced by database uniqueness.
+> - Tenant-scoped read and write operations.
+> - Persisted attempt history.
+> - Safe status transitions under concurrency.
+> - Lease owner/token and expiry support for future workers.
+> - Efficient indexes for due-delivery polling.
+> - Database timestamps and appropriate constraints.
+> - Preserve historical delivery references when endpoints are soft-deleted.
+> - No plaintext signing secrets or sensitive response headers stored.
+> - Forward-only Flyway migrations.
+>
+> Implement the planned `event_fanouts` marker, immutable body storage, cycle history, composite ownership constraints and dispatch controls. Fan-out completion must commit atomically with delivery/cycle creation, including zero recipients, so duplicate messages cannot select later subscribers. Follow the V8–V11 expand/backfill/validate plan and stop for review if unexpected legacy delivery rows prevent a trustworthy backfill.
+>
+> Add unit and PostgreSQL Testcontainers integration tests covering constraints, lifecycle transitions, cross-tenant access, duplicate creation, concurrent updates and rollback.
+>
+> Do not implement RabbitMQ consumption, outbound HTTP requests or retries.
+>
+> Run `spotlessApply`, `clean check` and `bootJar`. Report actual results.
+
+**Acceptance:** Delivery records and attempts are durable, tenant-safe and concurrency-safe.
+
+---
+
+# Step 2 — RabbitMQ Event Consumer and Subscription Fan-out
+
+### Goal
+
+Convert each successfully ingested event into individual endpoint delivery records.
+
+### Example
+
+```text
+Event: payment.succeeded
+         |
+         v
+RabbitMQ
+         |
+         v
+Event Consumer
+         |
+         +--> Endpoint A: Delivery 1
+         +--> Endpoint B: Delivery 2
+         +--> Endpoint C: Delivery 3
+```
+
+Each destination must have independent delivery state and attempts.
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 2: RabbitMQ event consumption and subscription fan-out.
+>
+> Read and follow [atomic fan-out and consumer recovery decisions](#3-decision-atomic-fan-out-snapshot) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read all project agent and architecture instructions. Inspect the existing `EVENT_INGESTED` outbox message contract, RabbitMQ topology and endpoint-subscription repositories.
+>
+> Implement a Spring AMQP consumer that:
+>
+> 1. Consumes the existing event messages.
+> 2. Resolves the trusted project/event identity from persisted data.
+> 3. Selects exact-match active subscriptions on enabled, nondeleted endpoints in one database snapshot at the first committed fan-out transaction—not at ingestion time.
+> 4. Creates independent, durable `PENDING` deliveries for eligible endpoints.
+> 5. Records fan-out completion, captured destination URLs, immutable body bytes and initial cycle 0 atomically with delivery creation.
+> 6. Prevents duplicate fan-out on RabbitMQ redelivery.
+> 7. Handles events with zero subscribed endpoints correctly.
+> 8. Uses manual single-message acknowledgements only after the database transaction commits, including duplicate and zero-recipient results.
+>
+> Validate notification identity against persisted outbox/event records; the AMQP message ID is the outbox UUID. Enforce the planned endpoint-count bound and message-size cap. Review legacy rotation messages and historical-event rollout before activation.
+>
+> Do not make outbound HTTP requests from the RabbitMQ listener.
+>
+> Implement bounded consumer concurrency/prefetch and explicit handling for malformed or unprocessable messages. Avoid infinite immediate requeue loops. Use a bounded broker poison-message strategy with diagnostics.
+>
+> Preserve the distinction between the broker's operational DLQ and HookRelay's customer-visible delivery DLQ.
+>
+> Verify duplicate message delivery, consumer crashes, database failures, concurrent consumers, endpoint deletion, disabled endpoints and tenant isolation.
+>
+> Use RabbitMQ and PostgreSQL integration tests where infrastructure permits.
+>
+> Run all verification commands and document exact results.
+
+**Acceptance:** One accepted event creates exactly one durable delivery for each eligible endpoint, regardless of duplicate consumer messages.
+
+---
+
+# Step 3 — SSRF-Safe Outbound HTTP Transport
+
+### Goal
+
+Create the secure HTTP client that will eventually send real webhooks.
+
+This is the most security-sensitive step of Phase 3.
+
+Registration-time SSRF validation is insufficient. The actual network connection must be made only to a validated destination.
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 3: a production-safe outbound webhook HTTP transport.
+>
+> Read and follow [HTTPS transport and retry policy](#7-decision-https-transport-and-retry-policy) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read the existing SSRF validator, DNS resolver, security ADRs, and project documentation.
+>
+> First, investigate the existing Java HTTP client options and verify which can safely bind outbound connections to validated DNS answers while preserving TLS hostname verification.
+>
+> Retain Spring `RestClient` for synchronous outbound HTTP with an explicitly selected request factory. Its underlying transport is classpath-dependent. Evaluate the selected Apache HttpClient 5 candidate through Spring's HttpComponents adapter, verifying the exact BOM-managed APIs, advisories, provenance and compatibility before adding a runtime dependency. A build-plugin dependency is not a runtime dependency. Prove connection-address pinning, TLS hostname verification and abortable total deadlines; a custom resolver alone is not proof. Do not replace this reviewed design or introduce WebFlux without a demonstrated need.
+>
+> Requirements:
+>
+> 1. Accept only HTTPS destinations on permitted ports, retaining the current port 443 restriction.
+> 2. Resolve and validate every DNS address at connection time.
+> 3. Reject mixed globally reachable and prohibited DNS answers.
+> 4. Ensure the actual socket connects to an approved address with no second uncontrolled DNS resolution.
+> 5. Preserve original-hostname SNI and certificate hostname verification.
+> 6. Never disable TLS certificate validation.
+> 7. Disable redirects by default.
+> 8. Prevent unexpected proxy configuration from bypassing IP enforcement.
+> 9. Enforce connect, response and overall request timeouts.
+> 10. Bound response-body consumption.
+> 11. Reject unsupported schemes, invalid authorities and dangerous IP representations.
+> 12. Bound connections and concurrency; initially disable connection reuse and HTTP/2 coalescing as specified in the transport decision.
+> 13. Release connections and other resources correctly, including cancellation during DNS/connect/TLS/upload/read; disable hidden retries, automatic authentication and cookies. Do not retain response bodies by default.
+>
+> Introduce a testable transport interface so HTTP behaviour can be tested without weakening production SSRF policy.
+>
+> Add deterministic tests for DNS rebinding, mixed DNS answers, private IPs, IPv6, timeouts, redirects, oversized responses, invalid TLS certificates, hostname mismatches and attempted unvalidated connections.
+>
+> Demonstrate with integration tests that DNS validation and the actual connection use the same approved address.
+>
+> Do not implement delivery scheduling or retry logic yet.
+>
+> Run all build verification commands and report remaining network-level protections required for deployment.
+
+**Acceptance:** The transport cannot connect to an unvalidated destination, and normal TLS hostname verification remains effective.
+
+---
+
+# Step 4 — HMAC Signing Protocol
+
+### Goal
+
+Ensure customers can verify that webhook requests genuinely came from HookRelay and were not modified.
+
+### Selected protocol
+
+Use the exact [signing protocol and rotation decision](#8-decision-signed-webhook-protocol-and-rotation):
+Standard Webhooks v1 HMAC wire construction, a stable delivery UUID as message ID,
+and event identity in the immutable authenticated JSON body.
+
+```http
+webhook-id: aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
+webhook-timestamp: 1790000000
+webhook-signature: v1,<standard-padded-base64-HMAC-SHA256>
+```
+
+The signed bytes are `ASCII(deliveryId) + "." + ASCII(epochSeconds) + "." + rawBodyBytes`.
+Decode the existing `whsec_` secret suffix as unpadded base64url to obtain the 32-byte
+HMAC key; do not sign with the printable secret string. Preserve immediate secret
+replacement and document in-flight overlap. Generic SDK key-format compatibility
+requires tests. Do not introduce a competing proprietary header format.
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 4: versioned HMAC-SHA256 webhook request signing.
+>
+> Read and follow [signing protocol and rotation semantics](#8-decision-signed-webhook-protocol-and-rotation) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read existing signing-secret generation, encryption, decryption, rotation and key-version handling.
+>
+> Requirements:
+>
+> - Implement and document the exact signed byte construction selected in the Architecture reference; preserve immutable envelope bytes through retry and replay.
+> - Sign the actual raw request bytes, not reconstructed JSON.
+> - Include event identity, delivery identity and timestamp in the authenticated material.
+> - Produce a fresh timestamp/signature for every delivery attempt.
+> - Decrypt endpoint secrets only when required.
+> - Never log plaintext secrets or signed payload internals unnecessarily.
+> - Preserve the existing encryption-key-version compatibility model.
+> - Document how webhook signing-secret rotation affects retries and replay.
+> - Prevent delivery from endpoints with unavailable or invalid signing secrets.
+> - Provide a reference verification example for customers using constant-time signature comparison and a configurable timestamp freshness window.
+>
+> Use the selected Standard Webhooks v1 wire construction and explicitly test/document HookRelay's existing base64url secret encoding. Preserve current immediate webhook-secret replacement, distinct from encryption-key rotation; do not claim server-side dual signing exists.
+>
+> Write deterministic tests using known HMAC test vectors, non-ASCII payloads, empty bodies, timestamp changes, modified payloads, wrong secrets and secret rotation.
+>
+> Integrate the signer with the outbound transport interface but do not start background delivery.
+>
+> Run all verification commands.
+
+**Acceptance:** Webhook requests can be generated and independently verified using the documented signing protocol.
+
+---
+
+# Step 5 — Delivery Dispatcher, Worker and Lease Management
+
+### Goal
+
+Take persisted due deliveries and execute them safely and asynchronously.
+
+### Recommended implementation
+
+Use a scheduler to claim eligible delivery rows in bounded batches.
+
+Conceptually:
+
+```text
+Scheduler wakes up
+       |
+       v
+Find due deliveries
+       |
+       v
+FOR UPDATE SKIP LOCKED
+       |
+       v
+Persist worker lease
+       |
+       v
+Commit claim transaction
+       |
+       v
+Execute HTTPS request
+       |
+       v
+Finalize attempt and outcome
+```
+
+Persist STARTED before transport; finalize it afterward. Never hold a database transaction open during the external HTTP request.
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 5: durable delivery scheduling and outbound execution.
+>
+> Read and follow [PostgreSQL scheduling, fencing and fairness](#6-decision-postgresql-scheduling-fencing-and-fairness) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read the delivery persistence layer, secure HTTP transport and HMAC signer.
+>
+> Implement a configurable Spring-based dispatcher that periodically claims a bounded batch of eligible deliveries from PostgreSQL.
+>
+> Requirements:
+>
+> 1. Claim due deliveries atomically using `FOR UPDATE SKIP LOCKED` or an equivalent proven database mechanism.
+> 2. Persist a fresh random lease token per claim and require project/state/token/unexpired-lease predicates for ownership-sensitive writes.
+> 3. Commit the claim before performing network I/O.
+> 4. Claim only available execution capacity and enforce the selected fleet-wide project/endpoint concurrency and rate limits; no unbounded executor queue.
+> 5. Recheck relevant endpoint state before starting transmission.
+> 6. Build signed HTTPS requests using the previously implemented components.
+> 7. Persist STARTED and increment lifetime/cycle attempt counts before HTTP; atomically finalize attempt, delivery, retry schedule and capacity release afterward.
+> 8. Enforce legal state transitions.
+> 9. Recover work abandoned by crashed workers.
+> 10. Prevent stale workers from overwriting newer state.
+> 11. Ensure timeout budgets and lease durations are consistent.
+> 12. Support graceful shutdown.
+>
+> Document the unavoidable at-least-once duplicate-delivery window if a worker crashes after the receiver processes the request but before HookRelay commits the result.
+>
+> Follow the documented lock order and endpoint lifecycle checks from the first worker implementation. Keep customer dispatch disabled until Steps 6–7 integrate retry and lifecycle behavior; use controlled receivers for this step. A stale lease cannot update the database, but cannot guarantee cancellation of a remote side effect.
+>
+> Do not claim exactly-once remote execution.
+>
+> Add tests for parallel workers, empty queues, lease expiry, worker crashes, slow endpoints, stale lease completion, duplicate claims, database unavailability and graceful shutdown.
+>
+> Run all verification commands.
+
+**Acceptance:** A pending delivery reaches its destination, records its attempt, and cannot be permanently stranded by a worker crash.
+
+---
+
+# Step 6 — Retry Engine, Backoff and Persistent DLQ
+
+### Goal
+
+Automatically recover from temporary endpoint failures and preserve permanently failed deliveries.
+
+### Selected default policy
+
+| Result                             | Behaviour                       |
+|------------------------------------|---------------------------------|
+| HTTP 2xx                           | Success                         |
+| HTTP 408                           | Retry                           |
+| HTTP 429                           | Retry; consider `Retry-After`   |
+| HTTP 5xx                           | Retry                           |
+| Connection timeout/network failure | Retry                           |
+| Most other HTTP 4xx                | Permanent failure               |
+| HTTP 3xx                           | Do not follow; treat as failure |
+| Max attempts exhausted             | Dead-letter                     |
+
+Use the selected 8-attempt/24-hour cycle budget, equal jitter with a 10-second base and one-hour cap, bounded Retry-After, and the full outcome classification in the reference. Persist each cycle's policy version/limits; configuration must not silently expand existing budgets.
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 6: persisted retry scheduling and customer-visible dead-letter handling.
+>
+> Read and follow [bounded retry policy and outcome classification](#7-decision-https-transport-and-retry-policy) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read the delivery state machine, worker implementation and current configuration.
+>
+> Implement a deterministic retry-policy component that classifies outcomes and calculates `next_attempt_at`.
+>
+> Requirements:
+>
+> - Retry transient network failures, timeouts, 408, 429 and appropriate 5xx responses.
+> - Treat most other 4xx responses as permanent failures unless the documented policy explicitly differs.
+> - Use exponential backoff with jitter.
+> - Bound backoff, attempt count and total retry horizon.
+> - Parse and cap `Retry-After` safely.
+> - Persist retry schedules in PostgreSQL.
+> - Never sleep worker threads waiting for retry times.
+> - Track actual attempt history.
+> - Transition exhausted or permanently failed deliveries into a persistent `DEAD_LETTERED` state.
+> - Preserve failure reasons and sanitized response metadata.
+> - Ensure terminal deliveries are not reclaimed automatically.
+> - Recover correctly after application restarts.
+>
+> Clearly distinguish customer-visible dead-lettered webhook deliveries from RabbitMQ's internal poison-message/DLX handling.
+>
+> Use an injectable clock and controlled jitter source for deterministic tests.
+>
+> Test every response classification, retry exhaustion, clock boundaries, restart recovery, concurrent workers and malformed `Retry-After` values.
+>
+> Do not implement customer-facing replay APIs in this step.
+>
+> Run all verification commands.
+
+**Acceptance:** Temporary failures retry automatically and terminal failures remain inspectable instead of disappearing.
+
+---
+
+# Step 7 — Replay, Cancellation and Endpoint Lifecycle
+
+### Goal
+
+Make failed deliveries recoverable without compromising historical integrity.
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 7: manual delivery replay and lifecycle integration.
+>
+> Read and follow [endpoint lifecycle, replay and customer DLQ](#9-decision-endpoint-lifecycle-replay-and-customer-dlq) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read current endpoint soft-delete, enable/disable and signing-secret rotation semantics.
+>
+> Implement:
+>
+> 1. Manual replay of eligible dead-lettered deliveries.
+> 2. Tenant-scoped replay authorization.
+> 3. Idempotency protection against repeated/concurrent replay requests.
+> 4. Replay audit records.
+> 5. Preservation of all previous delivery attempts.
+> 6. A fresh documented retry budget for replay, without erasing lifetime attempt history.
+> 7. Cancellation of pending/retry-scheduled deliveries when an endpoint is deleted.
+> 8. Explicit handling of disabled endpoints.
+> 9. Explicit handling of already in-flight deliveries during deletion/disable.
+> 10. Enforcement of signing-secret availability and current security policy on replay.
+>
+> Preserve one delivery per event/endpoint. Replay starts a new audited cycle on that delivery with a required project-scoped idempotency key; retain lifetime attempt numbers and use the captured URL, current secret and current security policy. Disabled endpoints pause queued work without extending its deadline; deletion fences and cancels it. Reuse the current APIs' lifecycle semantics and document unavoidable in-flight races. Step 7 implements the application service; Step 8 exposes its HTTP API.
+>
+> Design the replay state transitions to prevent duplicate concurrent scheduling.
+>
+> Document that a replay may deliver an event already processed by the receiver and that receivers must implement event/delivery idempotency.
+>
+> Add tests for duplicate replay, cross-tenant replay, deleted endpoints, disabled endpoints, successful deliveries, replay after secret rotation and concurrent replay requests.
+>
+> Run all verification commands.
+
+**Acceptance:** Failed deliveries can be safely replayed, historical attempts remain intact, and deleted endpoints cannot silently resume receiving webhooks.
+
+---
+
+# Step 8 — Delivery History, Attempts and DLQ APIs
+
+### Goal
+
+Expose the delivery engine through a usable API before creating the dashboard.
+
+### Suggested API surface
+
+Adapt routes to the existing project's actual `/v1` conventions.
+
+```http
+GET  /v1/deliveries
+GET  /v1/deliveries/{id}
+GET  /v1/deliveries/{id}/attempts
+POST /v1/deliveries/{id}/replay
+
+GET  /v1/dead-letters
+```
+
+Use delivery detail for dead-letter detail. Reuse Step 7's replay service through one replay endpoint; do not duplicate its state machine or audit handling.
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 8: delivery history, attempt history, dead-letter listing and replay APIs.
+>
+> Read and follow [tenant-scoped recovery APIs](#9-decision-endpoint-lifecycle-replay-and-customer-dlq) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read existing controller patterns, authentication filters, ProblemDetail conventions, pagination and OpenAPI definitions.
+>
+> Implement tenant-scoped endpoints for:
+>
+> - Listing deliveries by status, event, endpoint and date range.
+> - Retrieving one delivery.
+> - Listing delivery attempts.
+> - Viewing customer-visible dead-lettered deliveries.
+> - Replaying an eligible delivery.
+>
+> Requirements:
+>
+> - All authorization derives from trusted tenant context.
+> - Cross-tenant resources return 404.
+> - Results are paginated with stable ordering and bounded page sizes.
+> - Validation and errors follow existing API conventions.
+> - No plaintext signing secrets, encryption ciphertext, sensitive headers or unbounded response bodies are exposed.
+> - Replay writes have appropriate audit and abuse controls.
+> - Response contracts match the current OpenAPI conventions.
+>
+> Add MockMvc and Testcontainers integration tests for positive and negative scenarios.
+>
+> Update `docs/openapi.yaml` and relevant developer documentation.
+>
+> Run all verification commands.
+
+**Acceptance:** Customers can investigate deliveries, see why they failed and trigger authorized replay through the backend API.
+
+---
+
+# Step 9 — Backpressure, Fairness and Operational Observability
+
+### Goal
+
+Prevent failing endpoints or large customers from overwhelming the delivery infrastructure.
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 9: operational controls, backpressure and observability.
+>
+> Read and follow [retention, observability and rollout gates](#10-decision-schema-evolution-and-retention) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Review the complete delivery pipeline and identify unbounded work, connection, memory and database contention risks.
+>
+> Requirements:
+>
+> - Configurable maximum global concurrent deliveries.
+> - Configurable per-endpoint concurrency limits.
+> - Bounded executor queues and connection pools.
+> - Safe behaviour under database or broker outages.
+> - Fair scheduling so one noisy endpoint/project cannot indefinitely starve others.
+> - Limits on response size, attempt metadata and retained sensitive information.
+> - Metrics for pending deliveries, in-progress deliveries, success/failure rates, latency, retry volume, dead-letter volume and lease recovery.
+> - Structured logs with correlation IDs.
+> - No secrets or full sensitive webhook payloads in logs.
+> - Readiness/liveness design that does not accidentally expose administrative endpoints.
+> - Graceful worker shutdown and cancellation behaviour.
+> - Documented configuration defaults and operational tuning.
+> - The approved retention/cleanup job, idempotency-expiry contract, backup/erasure requirements and historical-backlog rollout policy from the reference.
+> - Load validation of the admission controls already required by Step 5; this step must not be the first introduction of basic dispatch bounds.
+>
+> Prefer existing Micrometer and Spring infrastructure. Do not introduce a new monitoring stack unless required.
+>
+> Use bounded-cardinality metric tags; avoid unrestricted event IDs, URLs and tenant IDs as metric labels.
+>
+> Add focused tests for concurrency limits, starvation risks, saturation, shutdown, lease-aware retention, replay near expiry and safe historical-backlog handling.
+>
+> Run all verification commands.
+
+**Acceptance:** Delivery remains bounded, observable and recoverable under overload and dependency failures.
+
+---
+
+# Step 10 — End-to-End Integration Tests, Postman and Documentation
+
+### Goal
+
+Verify the whole event-to-webhook flow, not just individual components.
+
+### Required end-to-end scenario
+
+```text
+1. Create endpoint
+2. Create subscription
+3. Publish event through ingestion API
+4. Outbox publisher publishes to RabbitMQ
+5. Consumer creates delivery
+6. Worker claims delivery
+7. HMAC signature is generated
+8. HTTPS request is sent
+9. Receiver verifies signature
+10. Delivery and attempt records reflect the outcome
+```
+
+### Coding-agent prompt
+
+> Implement Phase 3 Step 10: comprehensive end-to-end verification and documentation.
+>
+> Read and follow [required evidence and unresolved blockers](#12-phased-implementation-and-evidence-required) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
+>
+> Read the entire Phase 3 implementation and all project agent instructions.
+>
+> Create integration tests covering the real event-to-delivery lifecycle with PostgreSQL, RabbitMQ and a controlled HTTPS test receiver.
+>
+> Do not globally disable production SSRF policy or TLS verification to make localhost tests pass. Use properly isolated test transport/resolver configuration and prove production wiring remains strict.
+>
+> Required scenarios:
+>
+> 1. Successful end-to-end delivery.
+> 2. One event delivered to multiple endpoints.
+> 3. One failing endpoint does not block another.
+> 4. Invalid signature verification fails.
+> 5. Duplicate event ingestion is idempotent.
+> 6. RabbitMQ redelivery does not duplicate fan-out.
+> 7. Network timeout schedules retry.
+> 8. HTTP 429 respects bounded retry policy.
+> 9. HTTP 5xx eventually succeeds after retries.
+> 10. Permanent HTTP 4xx failure becomes dead-lettered.
+> 11. Retry exhaustion becomes dead-lettered.
+> 12. Manual replay succeeds.
+> 13. Endpoint deletion cancels queued work.
+> 14. Cross-tenant delivery access is rejected.
+> 15. Worker crash and lease recovery.
+> 16. Application restart preserves retry schedules.
+> 17. Concurrent workers preserve database state integrity.
+> 18. DNS rebinding and private-address SSRF attempts cannot reach prohibited destinations.
+> 19. TLS hostname mismatch is rejected.
+> 20. Secret rotation and replay behave according to the documented policy.
+>
+> Update both the comprehensive Postman API collection and the separate deployment smoke collection for all newly implemented HTTP APIs.
+>
+> Ensure smoke tests are repeatable and do not accumulate uncontrolled data.
+>
+> Run them twice against a running local development environment.
+>
+> Update OpenAPI, README, architecture documentation and a receiver signature-verification example.
+>
+> Run:
+>
+> - `./gradlew spotlessApply`
+> - `./gradlew clean check`
+> - `./gradlew bootJar`
+>
+> Run configured SBOM and vulnerability checks when their prerequisites are available. Report unavailable scans as NOT VERIFIED.
+>
+> Produce an exact execution report with passing, failing and skipped tests. Never invent results.
+
+**Acceptance:** A real accepted event successfully travels through the outbox, RabbitMQ, consumer, database delivery worker and signed HTTPS request, with reliable retries, DLQ and replay.
+
+---
+
+# Phase 3 Final Verification
+
+After completing Steps 0–10, run a separate independent review rather than relying only on the implementation agent's reports.
+
+### Final audit prompt
+
+> Act as an independent principal backend engineer, security auditor and reliability reviewer.
+>
+> Perform a comprehensive source-code and runtime audit of the completed HookRelay Phase 3 implementation.
+>
+> Verify the implementation against the Architecture reference in this document, including decisions and unresolved gates. Preserve the implementation prompts and completion checklist when updating documentation.
+>
+> Read `AGENTS.md`, `HOOKRELAY_OVERVIEW.md`, `docs/architecture.md`, `docs/PHASE_3_WEBHOOK_DELIVERY_ENGINE.md` and `docs/openapi.yaml`.
+>
+> Independently verify:
+>
+> 1. Event-to-delivery correctness.
+> 2. Transactional outbox integration.
+> 3. RabbitMQ consumer acknowledgements and duplicate handling.
+> 4. Fan-out atomicity and subscription semantics.
+> 5. Delivery database constraints and state transitions.
+> 6. PostgreSQL worker claims, leases, fencing and crash recovery.
+> 7. Actual socket-level SSRF prevention and TLS hostname verification.
+> 8. HMAC signing protocol and secret rotation.
+> 9. Retry policy, backoff and persistent customer-visible DLQ.
+> 10. Manual replay, cancellation and endpoint lifecycle races.
+> 11. Tenant isolation across every delivery API and worker query.
+> 12. Backpressure, rate limits and resource exhaustion.
+> 13. Sensitive-data exposure, logging and metrics.
+> 14. Database migrations, including upgrades from the Phase 2 schema.
+> 15. Dependency, container and build reproducibility.
+> 16. End-to-end integration tests and repeatable Postman smoke tests.
+>
+> Inspect actual code paths rather than accepting existing tests at face value.
+>
+> Add regression tests for defects. Fix genuine Phase 3 defects without adding unrelated features.
+>
+> Run the full build, relevant security checks and real runtime integration tests.
+>
+> Classify every finding as Critical, High, Medium or Low.
+>
+> Do not claim a security control is verified unless its actual enforcement has been tested.
+>
+> Create `docs/PHASE_3_FINAL_VERIFICATION.md`, including:
+>
+> - PASS / CONDITIONAL PASS / FAIL verdict.
+> - Full verification matrix.
+> - Code changes and regression tests.
+> - Runtime and Postman test results.
+> - Security findings and residual risks.
+> - Explicit at-least-once delivery limitations.
+> - Production-readiness blockers.
+> - Whether Phase 4 can begin.
+>
+> Do not manufacture passing test results or conceal environmental limitations.
+
+---
+
+# Definition of Done — Phase 3
+
+Phase 3 is complete when:
+
+- [ ] Events fan out reliably to subscribed endpoints.
+- [ ] Every delivery and attempt has durable database state.
+- [ ] Duplicate messages cannot create duplicate initial delivery records.
+- [ ] HTTPS requests use validated, pinned destinations and proper TLS hostname verification.
+- [ ] Each webhook is signed using the documented protocol.
+- [ ] Multiple workers can process deliveries safely.
+- [ ] Failed deliveries retry according to a persisted policy.
+- [ ] Permanent/exhausted failures enter the customer-visible DLQ.
+- [ ] Authorized customers can inspect and replay failed deliveries.
+- [ ] Soft-deleted and disabled endpoint behaviour is enforced.
+- [ ] Tenant isolation holds throughout the asynchronous pipeline.
+- [ ] The delivery engine remains bounded under overload.
+- [ ] Runtime integration tests and repeatable Postman smoke tests pass.
+- [ ] Critical and High findings are resolved.
+- [ ] OpenAPI and architecture documentation reflect the implementation.
+- [ ] The final verification report is complete.
+
+**Completion does not mean production deployment is approved.** Infrastructure egress controls, secrets management, vulnerability scanning, operational readiness and deployment hardening must also be verified before exposing the service publicly.
+
+---
+
+# Architecture reference
+
+Status: Step 0 design reference, reconciled on 2026-11-18 against commit `1e22357`.
+Integrated with the preserved Steps 0–10 prompts on 2026-11-19. No consumer, dispatcher,
 HTTP client, migration, dependency or public API is introduced by this document.
 
 Read alongside [AGENTS.md](../AGENTS.md), the product intent in
@@ -645,17 +1502,17 @@ plus DB completion margin. All proposed settings live under a validated
 
 ## 12. Phased implementation and evidence required
 
-| Phase                       | Deliverable                                                                                                                                          | Acceptance evidence before advancing                                                                                                                                                                                                                                                       |
+| Prompt step | Deliverable                                                                                                                                          | Acceptance evidence before advancing                                                                                                                                                                                                                                                       |
 |-----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 0 — This document           | Reconciled current state and decisions; no functional change.                                                                                        | Source/schema/API review and official references; documentation diff only.                                                                                                                                                                                                                 |
+| 0 — Architecture | Reconciled current state and decisions; no functional change.                                                                                        | Source/schema/API review and official references; documentation diff only.                                                                                                                                                                                                                 |
 | 1 — Persistence             | V8–V11 staged changes, state machine, cycles, scoped repositories and recipient snapshot storage.                                                    | Empty install and V7 upgrade tests, nonempty legacy fixtures, FK/tenant mismatch rejection, unique delivery/attempt races, legal transitions, rollback and zero-recipient marker.                                                                                                          |
 | 2 — Fan-out                 | Bounded manual-ack consumer, exact persisted-envelope checks, snapshot query, project endpoint cap, internal DLQ handling and reconciliation report. | Duplicate/concurrent consumption, subscription changes before/after snapshot, crash before commit/ACK, broker outages, DB pause/recovery, malformed/old messages, zero recipients and foreign project IDs. No HTTP yet.                                                                    |
 | 3 — Transport gate          | Dependency admission if needed; address-policy extraction, pinned HTTPS connection and abortable deadlines.                                          | Real socket destination observed; private/mapped IPv4/IPv6, metadata, mixed DNS, rebinding, literal bypass, TLS hostname mismatch, proxy bypass, redirects, upload/read stalls, oversized headers, socket cleanup. Tests use controlled infrastructure without relaxing production policy. |
 | 4 — Signing                 | Frozen envelope bytes and versioned signer, independent receiver example.                                                                            | Known HMAC vectors, non-ASCII bodies, tampered ID/time/body, wrong key, base64url secrets, freshness and dedup behavior, immediate rotation and old encryption key reads.                                                                                                                  |
-| 5 — Dispatch/retry          | PostgreSQL claims, admission controls, STARTED/final attempts, recovery and bounded retries.                                                         | Multi-instance limits/fairness, stale token rejection, DB failure after remote 2xx, unknown outcomes, pre-send crash, horizon/attempt bounds, Retry-After/jitter, graceful shutdown and no transaction held during network I/O.                                                            |
-| 6 — Recovery APIs/lifecycle | DLQ/detail/attempt/replay API, deletion reconciler, disable/URL/secret semantics and audit.                                                          | Cross-project read/replay/list, repeated keys, concurrent distinct replay keys, no budget/history reset, deleted/disabled endpoints and late completion races. Update OpenAPI and contract tests together.                                                                                 |
-| 7 — Operations/retention    | Cleanup, alarms, cutoff/backlog rollout and load validation.                                                                                         | Lease-aware cleanup, no dangling references or early dedup deletion, high fan-out/fairness load, outage recovery, replay near expiry and restore/erasure rehearsal.                                                                                                                        |
-| 8 — End-to-end verification | Real PostgreSQL, RabbitMQ and controlled HTTPS receiver; updated Postman collections.                                                                | Ingest → outbox → fan-out → signed HTTP; one endpoint fails independently; retries/DLQ/replay; restart/crash; two smoke runs without uncontrolled data accumulation; independent audit.                                                                                                    |
+| 5–6 — Dispatch/retry | PostgreSQL claims, admission controls, STARTED/final attempts, recovery and bounded retries.                                                         | Multi-instance limits/fairness, stale token rejection, DB failure after remote 2xx, unknown outcomes, pre-send crash, horizon/attempt bounds, Retry-After/jitter, graceful shutdown and no transaction held during network I/O.                                                            |
+| 7–8 — Recovery APIs/lifecycle | DLQ/detail/attempt/replay API, deletion reconciler, disable/URL/secret semantics and audit.                                                          | Cross-project read/replay/list, repeated keys, concurrent distinct replay keys, no budget/history reset, deleted/disabled endpoints and late completion races. Update OpenAPI and contract tests together.                                                                                 |
+| 9 — Operations/retention | Cleanup, alarms, cutoff/backlog rollout and load validation.                                                                                         | Lease-aware cleanup, no dangling references or early dedup deletion, high fan-out/fairness load, outage recovery, replay near expiry and restore/erasure rehearsal.                                                                                                                        |
+| 10 — End-to-end verification | Real PostgreSQL, RabbitMQ and controlled HTTPS receiver; updated Postman collections.                                                                | Ingest → outbox → fan-out → signed HTTP; one endpoint fails independently; retries/DLQ/replay; restart/crash; two smoke runs without uncontrolled data accumulation; independent audit.                                                                                                    |
 
 Existing tests to extend include `EventIngestionIntegrationTest` (concurrent keys),
 `OutboxIntegrationTest` (claim/publication/expiry), endpoint repository/controller and
@@ -664,7 +1521,7 @@ subscription integration suites, signing-secret/keyring tests, `DnsPolicyTest`,
 Existing outbox tests do not establish all negative-confirm, return, stale-worker or
 network-failure paths; add focused regressions rather than treating their names as proof.
 
-For each implementation phase run focused tests, then `./gradlew clean check`,
+For each implementation step run focused tests, then `./gradlew clean check`,
 `./gradlew bootJar`, `./gradlew cyclonedxBom`, and `./gradlew dependencyCheckAnalyze`
 from `backend/`. Dependency changes also require graph/lock/provenance review and
 image scans. Do not weaken strict verification or CVSS gates to pass. Record fresh
@@ -689,7 +1546,10 @@ decisions. The Apache 5.6.x reference currently identifies 5.6.5; that is not an
 instruction to override Spring Boot's BOM. Recheck exact installed APIs when the
 implementation dependency is selected. No dependencies were added in this step.
 
-Verification of this step is static source reconciliation, local Markdown link
-checking and `git diff --check`. No application tests, runtime delivery tests, SBOM,
+The original Step 0 verification was static source reconciliation, local Markdown
+link checking and `git diff --check`. The 2026-11-19 integration additionally checks
+preservation of all 11 coding-agent prompts, the final audit prompt, completion
+checklist and architecture sections; it validates links and confirms a documentation-only
+diff. No application tests, runtime delivery tests, SBOM,
 SCA or image scans were rerun for this documentation-only change. Earlier verification
 results remain historical, not proof of an engine that does not yet exist.
