@@ -55,22 +55,15 @@ spotless {
 }
 
 configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
-    // High/Critical findings fail the audit in CI with NVD data; suppressions require a
-    // reviewed, expiring exception. Without the NVD key, findings cannot be confirmed and
-    // the scan is reported as not verified, not as zero vulnerabilities (AGENTS.md 4.5).
-    val nvdApiKey = System.getenv("NVD_API_KEY")
-    autoUpdate = false
-    // Only fail on scanner errors when the NVD key is present; a scan that cannot run is
-    // reported as not verified, not as zero vulnerabilities (AGENTS.md 4.5).
-    failOnError = nvdApiKey?.isNotBlank() == true
-    // CVSS threshold only enforced in CI with NVD data. Float.MAX_VALUE disables CVSS
-    // gating locally since no CVSS score can exceed it.
-    failBuildOnCVSS = if (nvdApiKey?.isNotBlank() == true) 7.0F else Float.MAX_VALUE
+    // Credentials improve NVD rate limits; they never determine whether the audit fails.
+    // Missing/stale advisory data and scanner errors must not produce a passing audit.
+    autoUpdate = true
+    failOnError = true
+    failBuildOnCVSS = 7.0F
     skipTestGroups = false
     scanBuildEnv = true
     formats = listOf("HTML", "JSON")
-    // The NVD key is supplied by CI secrets only; autoUpdate stays false locally so the
-    // build does not depend on network access to NVD.
+    nvd.apiKey.set(providers.environmentVariable("NVD_API_KEY").filter { it.isNotBlank() })
 }
 
 tasks.withType<JavaCompile>().configureEach {

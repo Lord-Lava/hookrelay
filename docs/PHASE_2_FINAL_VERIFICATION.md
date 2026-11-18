@@ -1,5 +1,28 @@
 # Phase 2 verification — 2026-11-17
 
+## Follow-up verification — 2026-11-18
+
+The provenance verifier now handles Gradle distributions. Credential-dependent SCA
+bypasses introduced after the original review have been removed; advisory updates,
+CVSS >= 7.0 failures and scanner-error failures are unconditional again.
+
+- `python3 -m unittest discover -s scripts -p 'test_*.py'`: five regression tests passed.
+- `python3 scripts/verify-dependency-provenance.py --report /tmp/hookrelay-fixed-provenance.json`:
+  all 1,104 committed artifact entries matched official sources.
+- From `backend/`, `./gradlew --no-daemon clean check bootJar cyclonedxBom` passed.
+  The test task restored cached results: 158 tests, zero failures/errors/skips.
+- From `backend/`, `./gradlew --no-daemon dependencyCheckAnalyze --rerun-tasks` and
+  `env -u NVD_API_KEY ./gradlew --no-daemon dependencyCheckAnalyze --rerun-tasks`
+  both failed on the existing 44 advisory matches across eight components.
+- A temporary Gradle init task checked the evaluated scanner settings with an NVD
+  key present and absent: CVSS threshold 7.0, failure on scanner errors, updates
+  enabled and the optional key correctly bound without logging its value.
+- Docker was unavailable. Container integration tests were not freshly executed;
+  Compose smoke tests and image/secret scans were not rerun. The historical image
+  scan findings below remain unresolved. These changes do not constitute release approval.
+
+## Original verification
+
 The application checks pass. Release approval remains blocked by dependency scan
 findings and incomplete production controls. Passing compilation/tests is not a
 claim that the application or its dependencies are vulnerability-free.

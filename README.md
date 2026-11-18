@@ -124,6 +124,11 @@ The API key format is `hr_live_<prefix>_<secret>`. Only a SHA-256 hash is stored
 
 ## Useful commands
 
+Dependency scans refresh advisory data and fail on CVSS >= 7.0 or scanner errors,
+with or without `NVD_API_KEY`. The optional key improves NVD rate limits and is
+passed to the scanner through the environment. An unavailable advisory database
+is a failed, inconclusive audit; it never disables the security gate.
+
 ```bash
 # Generate the official Gradle Wrapper once (from repository root)
 ./backend/generate-wrapper.sh
