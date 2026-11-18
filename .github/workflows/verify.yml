@@ -37,6 +37,8 @@ jobs:
           ./gradlew --no-daemon clean check bootJar cyclonedxBom
       - name: Validate collection JSON and scripts
         run: node postman/check-collections.mjs
+      - name: Test dependency provenance verifier
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
       - name: Build image from source with strict dependency verification
         run: docker build --progress=plain -t hookrelay-review:local backend
       - name: Verify packaged application in isolated Compose services

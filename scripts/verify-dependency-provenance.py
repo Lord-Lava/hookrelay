@@ -26,8 +26,14 @@ def verify(item):
     path = f"{group.replace('.', '/')}/{name}/{version}/{artifact}"
     # Plugin marker POMs can legitimately differ between the Portal and Central.
     repositories = REPOSITORIES[::-1] if name.endswith('.gradle.plugin') else REPOSITORIES
-    for repository in repositories:
-        url = repository + path
+    urls = [repository + path for repository in repositories]
+    # Gradle distributions are not Maven artifacts; verify their published checksums
+    # directly without treating arbitrary coordinates as distribution downloads.
+    if (group, name) == ('gradle', 'gradle') and artifact in (
+            f'gradle-{version}-src.zip', f'gradle-{version}-bin.zip',
+            f'gradle-{version}-all.zip'):
+        urls = [f'https://downloads.gradle.org/distributions/{artifact}']
+    for url in urls:
         try:
             try:
                 if name.endswith('.gradle.plugin'):

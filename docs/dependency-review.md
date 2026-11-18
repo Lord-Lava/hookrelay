@@ -38,6 +38,12 @@ repository provenance check, not publisher signature authentication or an SCA sc
 It never edits or automatically accepts metadata. Review the generated report and
 metadata diff before committing dependency updates.
 
+Gradle source, binary and complete distribution ZIPs use the published SHA-256 at
+`https://downloads.gradle.org/distributions/` instead of Maven repository paths.
+Run `python3 -m unittest discover -s scripts -p 'test_*.py'` for routing and failure
+regressions, then `python3 scripts/verify-dependency-provenance.py` to verify the
+complete committed metadata against official sources.
+
 The clean-cache build command was:
 
 ```sh
