@@ -59,9 +59,13 @@ configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     // reviewed, expiring exception. Without the NVD key, findings cannot be confirmed and
     // the scan is reported as not verified, not as zero vulnerabilities (AGENTS.md 4.5).
     val nvdApiKey = System.getenv("NVD_API_KEY")
-    failBuildOnCVSS = if (nvdApiKey?.isNotBlank() == true) 7.0F else 11.0F
     autoUpdate = false
+    // Only fail on scanner errors when the NVD key is present; a scan that cannot run is
+    // reported as not verified, not as zero vulnerabilities (AGENTS.md 4.5).
     failOnError = nvdApiKey?.isNotBlank() == true
+    // CVSS threshold only enforced in CI with NVD data. Float.MAX_VALUE disables CVSS
+    // gating locally since no CVSS score can exceed it.
+    failBuildOnCVSS = if (nvdApiKey?.isNotBlank() == true) 7.0F else Float.MAX_VALUE
     skipTestGroups = false
     scanBuildEnv = true
     formats = listOf("HTML", "JSON")
