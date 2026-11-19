@@ -45,22 +45,28 @@
        tooling (testcontainers-postgresql 2.0.5 brings it onto testCompileClasspath). The
        component is not part of the deployed application or the container image. No fixed
        release exists, so the component-level findings are documented and accepted for the
-       build environment only. -->
+       build environment only. The shaded dependencies are matched by package URL. -->
   <suppress until="2027-02-20">
     <notes>Build environment only: shaded dependency inside docker-java-transport-zerodep 3.7.1 (build tooling via testcontainers-postgresql). docker-java project is archived/unmaintained with no fixed release. Component is not part of the deployed application or container image. Owner: platform engineering. Review: 2027-02-20.</notes>
-    <sha1>65c367c5802c3ad030ef79fef924296d8e4990f4</sha1>
+    <packageUrl regex="true">pkg:maven/org\.apache\.httpcomponents\.client5/httpclient5@5\.5\.1</packageUrl>
+    <cve>CVE-2026-71290</cve>
+    <cve>CVE-2026-64607</cve>
+  </suppress>
+  <suppress until="2027-02-20">
+    <notes>Build environment only: test-only dependency brought in by testcontainers-postgresql 2.0.5. Not part of the deployed application or container image. Owner: platform engineering. Review: 2027-02-20.</notes>
+    <packageUrl regex="true">pkg:maven/org\.apache\.httpcomponents\.client5/httpclient5-cache@5\.6\.2</packageUrl>
     <cve>CVE-2026-71290</cve>
     <cve>CVE-2026-64607</cve>
   </suppress>
   <suppress until="2027-02-20">
     <notes>Build environment only: shaded dependency inside docker-java-transport-zerodep 3.7.1 (build tooling via testcontainers-postgresql). docker-java project is archived/unmaintained with no fixed release. Component is not part of the deployed application or container image. Owner: platform engineering. Review: 2027-02-20.</notes>
-    <sha1>498f1e71fffc835edc3e9a42b3bcfcf2a804f0f4</sha1>
+    <packageUrl regex="true">pkg:maven/org\.apache\.httpcomponents\.core5/httpcore5-h2@5\.3\.6</packageUrl>
     <cve>CVE-2026-54399</cve>
     <cve>CVE-2026-54428</cve>
   </suppress>
   <suppress until="2027-02-20">
     <notes>Build environment only: shaded dependency inside docker-java-transport-zerodep 3.7.1 (build tooling via testcontainers-postgresql). docker-java project is archived/unmaintained with no fixed release. Component is not part of the deployed application or container image. Owner: platform engineering. Review: 2027-02-20.</notes>
-    <sha1>6cb5345bd550735be72fd0ece15bd2ca1ed27595</sha1>
+    <packageUrl regex="true">pkg:maven/org\.apache\.httpcomponents\.core5/httpcore5@5\.3\.6</packageUrl>
     <cve>CVE-2026-54399</cve>
     <cve>CVE-2026-54428</cve>
   </suppress>

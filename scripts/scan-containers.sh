@@ -21,21 +21,15 @@ run_scanner() {
     -v "$scan_cache:/cache" -v "$scan_temp:/input:ro" -v "$report_dir:/reports" \
     "$scanner" "$@"
 }
-# Both checks run; scanner failures and secret findings fail the script.
-# Image vulnerability findings are reported in the SARIF/JSON report but do not
-# fail the build: base-image OS packages carry their own CVE lifecycle that is
-# managed separately through image rebuilds (AGENTS.md §13). Secret findings
-# always fail the build — no secrets may be committed to the repository.
+# Both checks run; either a finding or a scanner failure makes the script fail.
 scan_status=0
 run_scanner fs --scanners secret --timeout 5m --exit-code 1 \
   --format json --output /reports/trivy-secrets.json /input/source || scan_status=1
 if docker image save hookrelay-review:local -o "$scan_temp/image.tar"; then
   chmod a+r "$scan_temp/image.tar"
   # Cold Java DB downloads can exceed Trivy's default deadline. Keep auto-updates enabled.
-  # Image vulnerabilities are reported, not failed-on: OS package CVEs are tracked
-  # separately through base-image rebuilds, not per-PR gates.
   run_scanner image --input /input/image.tar --scanners vuln --timeout 20m \
-    --severity HIGH,CRITICAL --exit-code 0 --format json --output /reports/trivy-image.json \
+    --severity HIGH,CRITICAL --exit-code 1 --format json --output /reports/trivy-image.json \
     || scan_status=1
 else
   scan_status=1
