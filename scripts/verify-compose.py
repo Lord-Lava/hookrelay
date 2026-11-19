@@ -29,6 +29,8 @@ def yaml_str(v, indent=0):
         return "\n".join(lines)
     if isinstance(v, list):
         return "\n".join(f"{pad}- {yaml_str(item, indent + 1).strip()}" for item in v)
+    if isinstance(v, str):
+        return f"{pad}{json.dumps(v)}"
     if isinstance(v, bool):
         return f"{pad}{str(v).lower()}"
     return f"{pad}{v}"
@@ -37,6 +39,7 @@ def yaml_str(v, indent=0):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--image', default='hookrelay-review:local')
+    parser.add_argument('--fanout', action='store_true', help='Enable reviewed fan-out in this disposable deployment and verify durable delivery creation')
     parser.add_argument('--newman', help='Optional path to an externally installed Newman binary')
     args = parser.parse_args()
     key_a = 'hr_live_verifyaa_' + secrets.token_hex(24)
@@ -66,6 +69,10 @@ def main():
                         'SPRING_DATASOURCE_USERNAME': 'hookrelay', 'SPRING_DATASOURCE_PASSWORD': password,
                         'SPRING_RABBITMQ_HOST': 'rabbitmq', 'SPRING_RABBITMQ_USERNAME': 'hookrelay', 'SPRING_RABBITMQ_PASSWORD': password},
                     'depends_on': {'postgres': {'condition': 'service_healthy'}, 'rabbitmq': {'condition': 'service_healthy'}}}}}
+        if args.fanout:
+            compose['services']['backend']['environment'].update({
+                'FANOUT_ENABLED': 'true', 'FANOUT_ROLLOUT_REVIEWED': 'true',
+                'FANOUT_ACCEPT_EVENTS_FROM': '2000-01-01T00:00:00Z'})
         config = temp / 'compose.yml'
         config.write_text(yaml_str(compose))
         config.chmod(0o600)
@@ -112,7 +119,27 @@ VALUES ('{uuid.uuid4()}','{project_b}','Verification B','verifybb','{hashlib.sha
             path = '/v1/endpoints/' + endpoint['id']
             assert request('GET', path, key_a)[0] == 200
             assert request('GET', path, key_b)[0] == 404
-            assert request('POST', '/v1/events', key_a, {'eventType':'test.compose','data':{'synthetic':True}})[0] == 202
+            if args.fanout:
+                assert request('PUT', path + '/subscriptions/test.compose', key_a)[0] in (200, 201)
+            status, _, accepted = request('POST', '/v1/events', key_a, {'eventType':'test.compose','data':{'synthetic':True}})
+            assert status == 202
+            if args.fanout:
+                event_id = str(uuid.UUID(accepted['eventId']))
+                endpoint_id = str(uuid.UUID(endpoint['id']))
+                query = f"""SELECT count(*) FROM event_fanouts f
+JOIN deliveries d ON d.project_id=f.project_id AND d.event_id=f.event_id
+WHERE f.project_id='{project_a}' AND f.event_id='{event_id}'
+AND d.endpoint_id='{endpoint_id}' AND f.recipient_count=1 AND d.status='PENDING';"""
+                deadline = time.monotonic() + 30
+                while True:
+                    result = run('exec', '-T', 'postgres', 'psql', '-U', 'hookrelay', '-d', 'hookrelay',
+                                 '-At', '-v', 'ON_ERROR_STOP=1', input=query, capture_output=True)
+                    if result.stdout.strip() == '1':
+                        break
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError('Committed fan-out deadline exceeded')
+                    time.sleep(0.2)
+                print('Compose fan-out smoke: accepted event -> outbox -> RabbitMQ -> committed pending delivery passed.', flush=True)
             assert request('GET', '/actuator/metrics')[0] == 404
             assert request('DELETE', path, key_a)[0] == 204
             print('Compose image smoke: health, auth, signing, tenant isolation, ingestion, management exposure passed.', flush=True)

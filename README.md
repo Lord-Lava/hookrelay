@@ -25,7 +25,7 @@ The backend dependencies managed by Spring Boot use its 4.1.2 BOM. It currently 
 - `POST /v1/events` with payload validation and idempotency
 - Endpoint management: create/list/get/update/enable/disable, event-type subscriptions, and one-time signing-secret creation/rotation (`POST /v1/endpoints`, `GET /v1/endpoints`, `GET|PATCH|DELETE /v1/endpoints/{id}`, `POST /v1/endpoints/{id}/{enable|disable|rotate-secret}`, `PUT|DELETE /v1/endpoints/{id}/subscriptions/{eventType}`)
 - Transactional outbox with PostgreSQL row locking, one-at-a-time leases, persistent JSON AMQP messages, publisher confirms, and retry scheduling
-- Phase 3 Step 1 delivery persistence: tenant-scoped states, attempts, execution cycles, fan-out snapshots and fenced lease operations (no dispatcher or outbound HTTP yet)
+- Phase 3 Steps 1–2: delivery persistence and opt-in RabbitMQ fan-out with transactional subscription snapshots, duplicate handling and acknowledgement after commit (no dispatcher or outbound HTTP yet)
 - HTTP admission controls: project rate limiting, streaming request-body caps, 8 KiB header cap, and Cache-Control/no-store on secret-bearing responses
 - Local-only seed organization, project, and API key; the secret is not printed to logs
 - Actuator health endpoint (metrics/info/Prometheus not exposed on the public listener)
@@ -34,6 +34,8 @@ The backend dependencies managed by Spring Boot use its 4.1.2 BOM. It currently 
 Pinned Gradle plugin versions live in `backend/gradle/libs.versions.toml`; Spring runtime libraries are governed by the Spring Boot 4.1.2 BOM.
 
 The actual outbound HTTP delivery worker, customer dashboard, billing, and customer-visible delivery DLQ are deliberately not implemented yet. The RabbitMQ dead-letter queue in this starter protects broker-consumer failures; it is not a substitute for the persistent delivery-failure/DLQ domain model.
+
+Fan-out is disabled by default. See [Step 2 rollout and verification](docs/PHASE_3_STEP_2_VERIFICATION.md) before enabling it. Projects may register at most 1,000 nondeleted endpoints; additional creation returns 409.
 
 ## Prerequisites
 

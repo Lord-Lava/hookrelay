@@ -7,10 +7,10 @@ prompt and Definition of Done. The completed Step 0 architecture is preserved in
 [Architecture reference](#architecture-reference) below, reconciled against `1e22357`
 on 2026-11-18 and integrated into these prompts on 2026-11-19.
 
-Step 0 is complete as a design exercise. Step 1 persistence is implemented (2026-11-20);
-its Docker-backed functional verification passed (181 tests and Compose smoke). Security
-scans still fail and require triage before release. Steps 2–10 remain implementation work.
-See [Step 1 implementation and verification](PHASE_3_STEP_1_VERIFICATION.md).
+Step 0 is complete as a design exercise. Steps 1–2 are implemented; Steps 3–10 remain
+implementation work. Fan-out is disabled by default pending deployment-specific review.
+See [Step 1 verification](PHASE_3_STEP_1_VERIFICATION.md) and
+[Step 2 rollout and verification](PHASE_3_STEP_2_VERIFICATION.md).
 Use the numbered prompts as the implementation sequence and the reference as their
 shared technical contract. Read the reference before executing a prompt; the prompt
 links identify the sections most relevant to that step. Preserve both parts when
@@ -274,6 +274,17 @@ Preserve historical delivery references when endpoints are soft-deleted (endpoin
 ### Goal
 
 Convert each successfully ingested event into individual endpoint delivery records.
+
+### Implementation status (2026-11-20)
+
+Implemented on `feat/event-fanout-consumer`: validated notifications, persisted identity
+checks, set-based subscription snapshots, atomic cycles/body/marker creation, manual
+ACK after commit, duplicate handling, bounded consumer recovery and operator
+reconciliation. Endpoint creation now enforces the planned project cap under a lock.
+The consumer remains disabled until a reviewed cutoff and broker/backlog policy are
+configured. No outbound HTTP or delivery retry worker is enabled. See the
+[rollout and verification record](PHASE_3_STEP_2_VERIFICATION.md). The prompt below
+remains intact as the acceptance contract.
 
 ### Example
 
@@ -1522,8 +1533,9 @@ Initial switches: fan-out enabled=false and dispatcher enabled=false, independen
 controlled, with fan-out-only observation before HTTPS activation. Configuration
 properties must reject nonpositive limits, response/body caps above approved bounds,
 per-endpoint > per-project > global concurrency, and leases shorter than total attempt
-plus DB completion margin. All proposed settings live under a validated
-`hookrelay.delivery` group; the existing signing/outbox settings retain their names.
+plus DB completion margin. Step 2 consumer settings live under validated `hookrelay.fanout` properties.
+Future transport/dispatcher settings belong under `hookrelay.delivery`; existing
+signing/outbox settings retain their names.
 
 ## 12. Phased implementation and evidence required
 
