@@ -12,9 +12,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
 
-/**
- * Atomic persistence for an already-selected recipient set. No subscription selector or listener.
- */
+/** Atomic, tenant-scoped fan-out persistence; no broker or network operations. */
 @Repository
 public class FanoutStore {
   private final JdbcTemplate jdbc;
@@ -45,29 +43,78 @@ public class FanoutStore {
         .findFirst();
   }
 
-  /**
-   * The future selector must use the same transaction and event lock as this persistence call.
-   * Recipient IDs are internal input, not public authorization. Ownership is rechecked in SQL. Once
-   * committed, even an empty snapshot is final; subsequent calls return the original bytes.
-   */
+  /** Bounded, project-scoped operator reconciliation; never republishes automatically. */
+  public List<UUID> findPublishedWithoutSnapshot(UUID projectId, int limit) {
+    if (limit < 1 || limit > 100)
+      throw new IllegalArgumentException("Invalid reconciliation limit");
+    return jdbc.query(
+        connection -> {
+          var query =
+              connection.prepareStatement(
+                  """
+                  SELECT e.id FROM events e WHERE e.project_id=?
+                    AND EXISTS (SELECT 1 FROM outbox_messages o WHERE o.project_id=e.project_id
+                      AND o.aggregate_id=e.id AND o.message_type='EVENT_INGESTED' AND o.status='PUBLISHED'
+                      AND o.published_at<clock_timestamp()-interval '60 seconds')
+                    AND NOT EXISTS (SELECT 1 FROM event_fanouts f WHERE f.project_id=e.project_id AND f.event_id=e.id)
+                  ORDER BY e.created_at,e.id LIMIT ?
+                  """);
+          query.setObject(1, projectId);
+          query.setInt(2, limit);
+          query.setQueryTimeout(5);
+          return query;
+        },
+        (rs, row) -> rs.getObject("id", UUID.class));
+  }
+
+  /** Internal explicit-recipient entry point retained for persistence callers. */
   public FanoutSnapshot create(
       UUID projectId, UUID eventId, List<UUID> recipientIds, byte[] body, DeliveryPolicy policy) {
     List<UUID> recipients = List.copyOf(recipientIds);
-    byte[] immutableBody = body.clone();
-    if (immutableBody.length < 2
-        || immutableBody.length > 270336
-        || recipients.size() > 1000
-        || new HashSet<>(recipients).size() != recipients.size()) {
+    if (recipients.size() > 1000 || new HashSet<>(recipients).size() != recipients.size())
       throw new IllegalArgumentException("Invalid fan-out snapshot");
-    }
+    return create(
+        projectId,
+        eventId,
+        body,
+        policy,
+        recipients.isEmpty() ? "false" : "e.id IN (:ids)",
+        java.util.Map.of("ids", recipients),
+        recipients.size());
+  }
+
+  /** Subscription eligibility and captured URLs come from the INSERT's single MVCC snapshot. */
+  public FanoutSnapshot createSubscribed(
+      UUID projectId, UUID eventId, String eventType, byte[] body, DeliveryPolicy policy) {
+    return create(
+        projectId,
+        eventId,
+        body,
+        policy,
+        """
+        EXISTS (SELECT 1 FROM endpoint_subscriptions s WHERE s.endpoint_id=e.id
+          AND s.event_type=:type AND s.deleted_at IS NULL)
+        """,
+        java.util.Map.of("type", eventType),
+        null);
+  }
+
+  private FanoutSnapshot create(
+      UUID projectId,
+      UUID eventId,
+      byte[] body,
+      DeliveryPolicy policy,
+      String selection,
+      java.util.Map<String, ?> selectionParameters,
+      Integer expectedCount) {
+    byte[] immutableBody = body.clone();
+    if (immutableBody.length < 2 || immutableBody.length > 270336)
+      throw new IllegalArgumentException("Invalid fan-out body");
     java.util.Objects.requireNonNull(policy, "policy");
     return transactions.execute(tx -> {
       var events =
           jdbc.query(
-              """
-              SELECT created_at FROM events
-              WHERE project_id = ? AND id = ? FOR UPDATE
-              """,
+              "SELECT created_at FROM events WHERE project_id=? AND id=? FOR UPDATE",
               (rs, row) -> rs.getTimestamp("created_at").toInstant(),
               projectId,
               eventId);
@@ -75,12 +122,11 @@ public class FanoutStore {
       var existing = find(projectId, eventId);
       if (existing.isPresent()) return existing.get();
       if (jdbc.queryForObject(
-              "SELECT count(*) FROM deliveries WHERE project_id = ? AND event_id = ?",
+              "SELECT count(*) FROM deliveries WHERE project_id=? AND event_id=?",
               Integer.class,
               projectId,
               eventId)
           != 0) throw new IllegalStateException("Incomplete existing fan-out requires review");
-      // Read time after acquiring the event lock; a contended lock can wait.
       Instant startedAt =
           jdbc.queryForObject("SELECT clock_timestamp()", java.time.OffsetDateTime.class)
               .toInstant();
@@ -89,56 +135,51 @@ public class FanoutStore {
       if (deadline.isAfter(retentionEnd)) deadline = retentionEnd;
       if (!deadline.isAfter(startedAt))
         throw new IllegalStateException("Event retention window expired");
-      // One statement snapshots endpoint URLs/state. Subscription selection is deliberately Step 2.
-      UUID[] ids = recipients.toArray(UUID[]::new);
-      List<Recipient> selected =
-          jdbc.query(
-              connection -> {
-                var statement =
-                    connection.prepareStatement(
-                        """
-                        SELECT id, url FROM endpoints
-                        WHERE project_id = ? AND id = ANY (?) AND deleted_at IS NULL AND enabled = true
-                        ORDER BY id
-                        """);
-                statement.setObject(1, projectId);
-                statement.setArray(2, connection.createArrayOf("uuid", ids));
-                return statement;
-              },
-              (rs, row) -> new Recipient(rs.getObject("id", UUID.class), rs.getString("url")));
-      if (selected.size() != recipients.size())
-        throw new IllegalArgumentException("Recipient not eligible");
-      for (Recipient recipient : selected) {
-        UUID deliveryId = UUID.randomUUID();
-        jdbc.update(
-            """
+      var parameters =
+          new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+              .addValues(selectionParameters)
+              .addValue("project", projectId)
+              .addValue("event", eventId)
+              .addValue("started", Timestamp.from(startedAt))
+              .addValue("deadline", Timestamp.from(deadline))
+              .addValue("policy", policy.version())
+              .addValue("attempts", policy.maxAttempts());
+      // selection is an internal constant, never external SQL. 1001 is overflow detection,
+      // not permission to commit a truncated recipient set.
+      String sql =
+          """
+          WITH eligible AS MATERIALIZED (
+            SELECT e.id,e.url FROM endpoints e WHERE e.project_id=:project
+              AND e.enabled AND e.deleted_at IS NULL AND (%s) ORDER BY e.id LIMIT 1001
+          ), inserted AS (
             INSERT INTO deliveries(id,project_id,event_id,endpoint_id,destination_url,status,
               attempt_count,next_attempt_at,cycle_number,cycle_attempt_count,cycle_started_at,
               cycle_deadline,policy_version,max_attempts)
-            VALUES (?,?,?,?,?,'PENDING',0,?,0,0,?,?,?,?)
-            """,
-            deliveryId,
-            projectId,
-            eventId,
-            recipient.id(),
-            recipient.url(),
-            Timestamp.from(startedAt),
-            Timestamp.from(startedAt),
-            Timestamp.from(deadline),
-            policy.version(),
-            policy.maxAttempts());
-        jdbc.update(
-            """
+            SELECT gen_random_uuid(),:project,:event,id,url,'PENDING',0,:started,0,0,
+              :started,:deadline,:policy,:attempts FROM eligible
+            WHERE (SELECT count(*) FROM eligible)<=1000 RETURNING id
+          ), cycles AS (
             INSERT INTO delivery_cycles(project_id,delivery_id,cycle_number,started_at,deadline,policy_version,max_attempts)
-            VALUES (?,?,0,?,?,?,?)
-            """,
-            projectId,
-            deliveryId,
-            Timestamp.from(startedAt),
-            Timestamp.from(deadline),
-            policy.version(),
-            policy.maxAttempts());
-      }
+            SELECT :project,id,0,:started,:deadline,:policy,:attempts FROM inserted RETURNING delivery_id
+          )
+          SELECT (SELECT count(*) FROM eligible) AS recipients,(SELECT count(*) FROM cycles) AS cycles
+          """
+              .formatted(selection);
+      int count =
+          new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+              .queryForObject(
+                  sql,
+                  parameters,
+                  (rs, row) -> {
+                    int recipients = rs.getInt("recipients");
+                    if (recipients > 1000)
+                      throw new IllegalStateException("Recipient capacity exceeded");
+                    if (recipients != rs.getInt("cycles"))
+                      throw new IllegalStateException("Incomplete fan-out");
+                    return recipients;
+                  });
+      if (expectedCount != null && count != expectedCount)
+        throw new IllegalArgumentException("Recipient not eligible");
       jdbc.update(
           """
           INSERT INTO event_fanouts(project_id,event_id,snapshot_at,recipient_count,body_version,body)
@@ -147,11 +188,9 @@ public class FanoutStore {
           projectId,
           eventId,
           Timestamp.from(startedAt),
-          selected.size(),
+          count,
           immutableBody);
       return find(projectId, eventId).orElseThrow();
     });
   }
-
-  private record Recipient(UUID id, String url) {}
 }

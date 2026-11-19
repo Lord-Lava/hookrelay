@@ -58,6 +58,12 @@ management:
       application: hookrelay-api
 
 hookrelay:
+  fanout:
+    enabled: ${FANOUT_ENABLED:false}
+    rollout-reviewed: ${FANOUT_ROLLOUT_REVIEWED:false}
+    accept-events-from: ${FANOUT_ACCEPT_EVENTS_FROM:}
+    concurrency: ${FANOUT_CONCURRENCY:2}
+    prefetch: ${FANOUT_PREFETCH:10}
   rate-limit:
     requests: ${PROJECT_REQUESTS_PER_WINDOW:1000}
     window-seconds: ${PROJECT_REQUEST_WINDOW_SECONDS:60}

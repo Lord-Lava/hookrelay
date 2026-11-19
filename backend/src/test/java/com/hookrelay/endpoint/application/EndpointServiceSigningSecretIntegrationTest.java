@@ -84,6 +84,39 @@ class EndpointServiceSigningSecretIntegrationTest {
   }
 
   @Test
+  void endpointCapacityIsSerializedAcrossConcurrentCreates() throws Exception {
+    jdbcTemplate.update(
+        """
+        INSERT INTO endpoints(id,project_id,url,signing_secret_ciphertext,enabled)
+        SELECT gen_random_uuid(),?,'https://8.8.8.8/capacity/' || n,'',false
+        FROM generate_series(1,999) n
+        """,
+        projectId);
+    var start = new java.util.concurrent.CountDownLatch(1);
+    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+      var tasks = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+      for (int i = 0; i < 2; i++) {
+        int number = i;
+        tasks.add(
+            executor.submit(() -> {
+              start.await();
+              try {
+                endpointService.createEndpoint(projectId, "https://8.8.8.8/new/" + number, null);
+                return true;
+              } catch (EndpointCapacityException expected) {
+                return false;
+              }
+            }));
+      }
+      start.countDown();
+      int created = 0;
+      for (var task : tasks) if (task.get(20, java.util.concurrent.TimeUnit.SECONDS)) created++;
+      assertThat(created).isEqualTo(1);
+      assertThat(endpointRepository.countByProject(projectId)).isEqualTo(1000);
+    }
+  }
+
+  @Test
   void createEndpointReturnsPlaintextSecretOnce() {
     EndpointService.CreatedEndpointResult result =
         endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
