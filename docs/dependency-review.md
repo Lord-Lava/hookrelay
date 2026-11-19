@@ -56,3 +56,76 @@ build-plugin locking adds the existing plugin classpath without version override
 See `PHASE_2_FINAL_VERIFICATION.md` for subsequent vulnerability and image scan results.
 
 Provenance result: 898/898 artifacts matched their official repository on 2026-11-16.
+
+## Security triage — 2026-11-20
+
+Dependency-Check and Trivy reported findings against the build and container image.
+The triage distinguishes application runtime findings (fixed) from build-environment
+findings (documented, narrowly scoped exceptions).
+
+### Fixed: RabbitMQ AMQP client
+
+`com.rabbitmq:amqp-client` was managed by the Spring Boot 4.1.2 BOM at 5.31.0, affected
+by four High advisories:
+
+| Advisory | Fixed in | Notes |
+|---|---|---|
+| CVE-2026-63337 | 5.33.0 | Unvalidated Class.forName in JSON-RPC `ProcedureDescription` (GHSA-6g32-pxv4-2wfj) |
+| CVE-2026-69219 | 5.33.1 | Oversized LongString allocation → OOM in `ValueReader.readBytes` |
+| CVE-2026-69220 | 5.33.1 | Unbounded recursive table/array nesting → stack overflow in `ValueReader` |
+| CVE-2026-75516 | 5.34.0 | Frame-level OOM: `frameMax=0` defeats frame size enforcement in `AMQConnection` |
+
+Spring Boot 4.1.2 is the latest 4.1.x patch, so no Boot patch manages a fixed client.
+Per AGENTS.md 3.3/4.1 the managed transitive dependency is pinned explicitly for a
+documented security reason in `backend/build.gradle.kts`, with the version centralized
+in `backend/gradle/libs.versions.toml` (`rabbitmqAmqpClient = "5.34.0"`). RabbitMQ client
+5.x remains backward compatible within the 5.x line; 5.33.0's security hardening
+(default hostname verification, stricter TLS defaults, JSON-RPC allowlist) is compatible
+with Spring Boot's Rabbit auto-configuration, as verified by the RabbitMQ container
+integration tests. Re-evaluate on any Boot 4.1.x patch.
+
+Official evidence:
+- https://github.com/advisories/GHSA-6g32-pxv4-2wfj (CVE-2026-63337)
+- https://github.com/rabbitmq/rabbitmq-java-client/releases/tag/v5.33.0
+- https://github.com/rabbitmq/rabbitmq-java-client/releases/tag/v5.33.1
+- https://github.com/rabbitmq/rabbitmq-java-client/releases/tag/v5.34.0
+
+### Build-environment findings (narrow, documented suppressions)
+
+All remaining Dependency-Check findings are build-time tooling only: none is part of
+the deployed application or the container image (Trivy image scan reports findings
+solely for `amqp-client`, now fixed, and is not suppressed). Each exception below is
+per-CVE, per-component, with justification, compensating controls, owner and a
+90-day review date (AGENTS.md 4.5). They live in
+`backend/gradle/dependency-check-suppressions.xml`, wired through
+`dependencyCheck.suppressionFile`.
+
+- `io.spring.gradle:dependency-management-plugin:1.1.7` — Gradle build plugin, latest
+  release 1.1.7 (maintenance mode, no fixed version). Flagged Spring Framework CVEs
+  target Spring MVC/WebFlux applications; the plugin is a build tool. Build runs in
+  isolated CI with locked, verification-metadata-checked dependencies.
+- `com.github.docker-java:docker-java-transport-zerodep:3.7.1` — archived/unmaintained
+  project, brought in by testcontainers-postgresql 2.0.5 onto `testCompileClasspath`
+  only; findings are on shaded `httpclient5`/`httpcore5` POMs inside it.
+- `org.apache.httpcomponents.client5:httpclient5-cache:5.6.2` — build tooling only.
+- `org.jetbrains.kotlin:kotlin-stdlib-jdk7/jdk8:1.9.10` — Kotlin bundled by Gradle
+  9.9.1 (the approved baseline); no independent Kotlin upgrade path without a Gradle
+  upgrade.
+- `org.springframework.boot:spring-boot-loader-tools:4.1.2` — confirmed false positive:
+  CVE-2022-31691 concerns Spring Tools 4 for Eclipse (IDE plug-in), not the Boot loader
+  tools library.
+
+### Verification after triage (2026-11-20)
+
+| Command | Result |
+|---|---|
+| `./gradlew --no-daemon clean check bootJar cyclonedxBom` | Passed: 181 tests, zero failures/errors/skips |
+| `./gradlew --no-daemon dependencyCheckAnalyze --rerun-tasks` | Passed with suppressions applied |
+| `docker build --progress=plain -t hookrelay-review:local backend` | Passed |
+| `scripts/scan-containers.sh` (Trivy image + secrets) | Passed: 0 vulnerabilities, 0 secrets |
+| `python3 scripts/verify-compose.py --image hookrelay-review:local` | Passed: health, auth, signing, tenant isolation, ingestion, management exposure |
+
+Lockfile and verification-metadata changes are limited to `amqp-client`
+5.31.0 → 5.34.0 (and its recorded SHA-256). See `verify-dependency-provenance.py`
+for the provenance check procedure; 1,104 committed artifact entries matched official
+sources after this change.

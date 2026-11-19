@@ -4,6 +4,8 @@ spotless = "8.11.0"
 google-java-format = "2.0.0"
 owasp-dependency-check = "13.0.0"
 cyclonedx = "3.5.1"
+# Security override: amqp-client pinned to 5.34.0 (see build.gradle.kts).
+rabbitmqAmqpClient = "5.34.0"
 
 [plugins]
 spring-boot = { id = "org.springframework.boot", version.ref = "spring-boot" }
