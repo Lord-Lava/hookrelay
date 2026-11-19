@@ -72,7 +72,7 @@ subscription index may lock populated tables; review deployment timing and use a
 separately reviewed concurrent-index strategy where warranted. No worker is enabled
 by these migrations, so applying them does not initiate outbound sends.
 
-## Verification
+## Initial verification without Docker
 
 Commands below ran from the repository root with the committed Gradle Wrapper and
 Java 25. No dependency locking, verification or security gates were relaxed.
@@ -122,7 +122,46 @@ Compose smoke tests and image scanning could not run without Docker. Dependency
 vulnerability scanning was not rerun for this dependency-unchanged step; no claim is
 made about current vulnerability status. Compilation also reports the existing
 Jackson `JsonNode.isTextual()` deprecation in `EventIngestionService`, outside this
-step's changes. Docker-backed full verification remains a release gate.
+step's changes. The Docker-backed verification gap was closed in the follow-up below.
+
+## Docker-backed follow-up (2026-11-20)
+
+Docker became available for a fresh verification of commits `0f8763a` and `af0890a`.
+No application, dependency, test or security-gate changes were needed. The initial
+Docker limitation above is historical; all committed integration tests now ran
+against their actual PostgreSQL/RabbitMQ containers.
+
+| Command (repository root unless specified) | Result |
+|---|---|
+| `./gradlew --no-daemon --version` from `backend/` | Gradle 9.9.1; Temurin Java 25.0.5+8. |
+| `./gradlew --no-daemon clean check bootJar cyclonedxBom` from `backend/` | Passed: **181 tests, zero failures/errors/skips**; formatting, import checks, JAR and SBOM passed. |
+| `node postman/check-collections.mjs` | Passed: JSON bodies/scripts for 75 requests. This validates collections, not live Newman execution. |
+| `python3 -m unittest discover -s scripts -p 'test_*.py'` | Passed: 5 provenance-verifier tests. |
+| `docker build --progress=plain -t hookrelay-review:local backend` | Passed with the existing strict dependency verification. |
+| `python3 scripts/verify-compose.py --image hookrelay-review:local` | Passed: health, authentication, secret creation, tenant isolation, event ingestion, endpoint deletion and management exposure. Disposable services were removed. |
+| `./gradlew --no-daemon dependencyCheckAnalyze --rerun-tasks` from `backend/` | **Failed** on the CVSS gate. The report contains 38 distinct advisories across 8 reported components; 16 distinct CVEs appear in the threshold-failure summary. No analysis exceptions reported. Findings are not yet triaged. |
+| `scripts/scan-containers.sh` | **Failed** on four High-severity Java image findings. Tracked-source secret scan reported zero findings; no High/Critical OS-package findings were reported. |
+
+The image scanner reports all four findings against `com.rabbitmq:amqp-client:5.31.0`:
+`CVE-2026-63337`, `CVE-2026-69219`, `CVE-2026-69220`, and `CVE-2026-75516`.
+Dependency-Check also reports build/test components, including Spring dependency
+management, shaded Docker-client HTTP libraries, Kotlin compatibility artifacts and
+Boot loader tools. These are scanner observations, not confirmed exploitability or
+approved false positives. Step 1 did not change the dependency graph. Review affected
+ranges, provenance and compatible BOM-managed remediation separately; no suppressions,
+version overrides or threshold changes were introduced to make checks pass.
+
+Local generated evidence (excluded from Git):
+
+- `backend/build/reports/tests/test/index.html`
+- `backend/build/reports/dependency-check/dependency-check-report.html` and `.json`
+- `backend/build/reports/trivy-image.json`
+- `backend/build/reports/trivy-secrets.json`
+
+The Docker-backed functional checks are complete. **Security gates remain failed;
+this verification is not a clean release approval.** Publishing the implementation
+and verification commits does not resolve those findings. CodeQL was not run locally;
+it remains a separate configured CI job.
 
 ## Official API references reviewed
 

@@ -8,7 +8,8 @@ prompt and Definition of Done. The completed Step 0 architecture is preserved in
 on 2026-11-18 and integrated into these prompts on 2026-11-19.
 
 Step 0 is complete as a design exercise. Step 1 persistence is implemented (2026-11-20);
-its standard Docker verification remains pending. Steps 2–10 remain implementation work.
+its Docker-backed functional verification passed (181 tests and Compose smoke). Security
+scans still fail and require triage before release. Steps 2–10 remain implementation work.
 See [Step 1 implementation and verification](PHASE_3_STEP_1_VERIFICATION.md).
 Use the numbered prompts as the implementation sequence and the reference as their
 shared technical contract. Read the reference before executing a prompt; the prompt
