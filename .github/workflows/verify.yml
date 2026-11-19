@@ -3,14 +3,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    paths:
-      - 'backend/**'
-      - 'scripts/**'
-      - 'postman/**'
-      - '.github/**'
-      - 'docs/PHASE_*.md'
-      - 'docs/architecture.md'
-      - 'docs/openapi.yaml'
   workflow_dispatch:
   schedule:
     - cron: '17 4 * * 1'
