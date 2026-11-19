@@ -99,3 +99,49 @@ advice (order 0), so invalid fields retain the documented `errors` object. See
 https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-rest-exceptions.html.
 OpenAPI contract tests parse the specification and compare controller operations,
 DTO fields, request length constraints and local schema references.
+
+
+## ADR-012: Delivery persistence foundation (Phase 3 Step 1)
+
+V8–V11 extend the existing delivery/attempt tables with explicit project ownership,
+lease tokens/expiry, captured destinations, cycle limits and attempt outcomes.
+Composite foreign keys prevent cross-project references. Initial delivery uniqueness
+remains `(event_id, endpoint_id)`; lifetime attempt numbers remain unique per delivery.
+Cycle 0 is mandatory at commit through a deferred composite foreign key. Later replay
+cycles have schema support for project-scoped replay keys and actor audit metadata;
+there is no replay operation yet.
+
+`delivery.domain` owns legal states and persisted values. `delivery.repository.FanoutStore`
+uses an event row lock and one transaction to insert deliveries, initial cycles and
+`event_fanouts`, including an empty recipient snapshot. Stored bytes and destination
+URLs are never updated by these repositories. No signing secrets or response bodies
+are stored. The marker is an insert-only application contract, not a PostgreSQL trigger
+that prevents a database administrator from modifying rows.
+
+Recipient selection is not implemented. Step 2 must select active subscriptions in
+the same event-locked transaction; the snapshot is at first committed fan-out processing,
+not ingestion. An existing marker returns its original bytes and recipients without
+adding later subscribers. The current store validates the supplied internal recipient
+IDs against project ownership and active endpoint state.
+
+`DeliveryStore` provides scoped, bounded reads and guarded claim/start/completion,
+lease-expiry recovery, cancellation and horizon expiry. Mutation lock order is project
+control, endpoint control, endpoint, delivery, attempt. Fresh tokens and database time
+fence expired workers. A claim consumes no attempt; STARTED increments lifetime and
+cycle counts atomically. Completion updates attempt, delivery and cycle in one transaction.
+Recovery marks an unfinished attempt UNKNOWN without inventing an HTTP outcome.
+Terminal delivery references survive endpoint soft deletion.
+
+Dispatch control rows and due/expiry indexes are foundations, not admission enforcement
+or a scheduler. No caller initiates delivery work yet. Callers must supply classified
+outcomes and due times; HTTP classification, backoff, fleet quotas, polling, endpoint
+reconciliation and audited replay are later steps. A queued expired horizon can be
+terminalized without creating a transport attempt, even while its endpoint is disabled.
+
+V8 stops on unexpected preexisting delivery history because historical destinations
+cannot be inferred from current endpoints. The empty-history V7 upgrade preserves
+existing events/endpoints; V10 enforces the new invariants. Review populated-table DDL
+locks before deployment. Details and actual test outcomes are in
+[Step 1 verification](PHASE_3_STEP_1_VERIFICATION.md); the
+[Phase 3 prompts and architecture reference](PHASE_3_WEBHOOK_DELIVERY_ENGINE.md) remain
+intact for subsequent implementation.

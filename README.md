@@ -25,6 +25,7 @@ The backend dependencies managed by Spring Boot use its 4.1.2 BOM. It currently 
 - `POST /v1/events` with payload validation and idempotency
 - Endpoint management: create/list/get/update/enable/disable, event-type subscriptions, and one-time signing-secret creation/rotation (`POST /v1/endpoints`, `GET /v1/endpoints`, `GET|PATCH|DELETE /v1/endpoints/{id}`, `POST /v1/endpoints/{id}/{enable|disable|rotate-secret}`, `PUT|DELETE /v1/endpoints/{id}/subscriptions/{eventType}`)
 - Transactional outbox with PostgreSQL row locking, one-at-a-time leases, persistent JSON AMQP messages, publisher confirms, and retry scheduling
+- Phase 3 Step 1 delivery persistence: tenant-scoped states, attempts, execution cycles, fan-out snapshots and fenced lease operations (no dispatcher or outbound HTTP yet)
 - HTTP admission controls: project rate limiting, streaming request-body caps, 8 KiB header cap, and Cache-Control/no-store on secret-bearing responses
 - Local-only seed organization, project, and API key; the secret is not printed to logs
 - Actuator health endpoint (metrics/info/Prometheus not exposed on the public listener)
@@ -244,7 +245,7 @@ Before onboarding real customers, implement and review:
 
 1. Outbound destination registration and strict SSRF defenses (private/reserved IP ranges, DNS rebinding, redirect policy, metadata endpoints, port allowlists, response-size and timeout limits).
 2. Delivery creation for matching endpoint subscriptions, signed HTTP dispatch, concurrency and per-endpoint rate limits.
-3. Persistent delivery attempts, customer-visible DLQ, manual/batch replay, and replay audit trail.
+3. Customer-visible delivery history/DLQ APIs, manual/batch replay, and replay audit trail (Step 1 persistence is implemented).
 4. API-key creation/rotation/revocation management, organization membership, dashboard authentication, authorization, and audit logs.
 5. Secret encryption with KMS/envelope encryption (the migration reserves a ciphertext column for endpoint signing secrets).
 6. Payload retention/deletion policies, data export, privacy controls, backup/restore and disaster-recovery procedures.

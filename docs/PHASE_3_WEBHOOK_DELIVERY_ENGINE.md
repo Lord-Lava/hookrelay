@@ -7,7 +7,9 @@ prompt and Definition of Done. The completed Step 0 architecture is preserved in
 [Architecture reference](#architecture-reference) below, reconciled against `1e22357`
 on 2026-11-18 and integrated into these prompts on 2026-11-19.
 
-Step 0 is complete as a design exercise; Steps 1–10 remain implementation work.
+Step 0 is complete as a design exercise. Step 1 persistence is implemented (2026-11-20);
+its standard Docker verification remains pending. Steps 2–10 remain implementation work.
+See [Step 1 implementation and verification](PHASE_3_STEP_1_VERIFICATION.md).
 Use the numbered prompts as the implementation sequence and the reference as their
 shared technical contract. Read the reference before executing a prompt; the prompt
 links identify the sections most relevant to that step. Preserve both parts when
@@ -149,6 +151,24 @@ Understand the existing code and establish Phase 3 contracts before modifying pr
 ### Goal
 
 Create the durable foundation for individual webhook deliveries and attempts.
+
+### Implementation status (2026-11-20)
+
+V8–V11, the delivery domain and tenant-scoped JDBC stores now exist. The stores
+atomically persist a supplied recipient snapshot, cycle 0 and immutable body bytes;
+zero recipients also commit a final marker. They support fenced claim/start/result,
+expiry recovery, cancellation and horizon expiry as persistence operations. No worker,
+consumer, retry calculation, replay endpoint or outbound transport is enabled.
+
+`FanoutStore` accepts internal recipient IDs; Step 2 must select eligible subscriptions
+inside the same event-locked transaction. It must not select recipients at ingestion
+or outside that transaction. Dispatch-control locks exist, but capacity/rate admission
+and polling remain Step 5 work. Endpoint lifecycle reconciliation remains Step 7.
+
+V8 deliberately refuses any legacy delivery/attempt history: historical destinations
+cannot be reconstructed reliably. V10 needs no delivery backfill on the supported
+empty-history upgrade path. Follow the [verification and rollout notes](PHASE_3_STEP_1_VERIFICATION.md)
+before deployment. The original prompt below remains the acceptance contract.
 
 ### Selected delivery states
 
@@ -1416,12 +1436,16 @@ roles remain future work. Never return stored ciphertext, signatures or plaintex
 
 ## 10. Decision: schema evolution and retention
 
-All migrations are forward-only after V7; names/numbers below are planned, not files
-created here. Inspect deployed contents before assuming the unused tables are empty.
-Use expand/backfill/validate phases and bounded batches for populated databases.
-Do not silently coerce unknown statuses or discard legacy attempts.
+V8–V11 below are now implemented as forward-only migrations. V8 checks that both
+legacy delivery tables are empty before expanding them; otherwise migration stops
+without deleting history. V10 adds constraints on that supported empty-history path;
+there is no speculative backfill. A populated deployment requires an operator-reviewed
+migration plan before retrying rollout. Inspect deployed contents and table sizes first;
+unique constraints on existing events/endpoints/API keys and the subscription index
+can lock populated tables. Use bounded backfills and separately reviewed concurrent
+index builds where needed. Never coerce unknown statuses or discard legacy attempts.
 
-| Planned migration                  | Required change                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Migration                         | Design contract                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 |------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | V8 `expand_delivery_state`         | Add nullable `deliveries.project_id`, captured `destination_url`, `lease_owner/token/expires_at`, terminal time/error, current cycle number/count/start/deadline and policy version/limits. Add attempt `project_id`, `cycle_number`, `lease_token`, `started_at`, `completed_at`, `outcome`, bounded error category. Keep V1 `attempted_at`; backfill start from it. Keep `response_body` nullable and write NULL for MVP; do not claim timestamps already existed.                                                                                                                        |
 | V9 `delivery_fanout_and_cycles`    | Add `event_fanouts` with `(project_id,event_id)` PK, snapshot time, recipient count, body version and bounded BYTEA body; completion row exists only with committed fan-out. Add `delivery_cycles` with `(project_id,delivery_id,cycle_number)` PK, start/deadline/policy, terminal outcome/time, replay key/fingerprint, actor key ID and reason. Cycle 0 is initial; replay keys have a partial unique `(project_id,replay_key)` constraint. Add `project_dispatch_controls` and `endpoint_dispatch_controls` for admission windows and last-served times.                                |
