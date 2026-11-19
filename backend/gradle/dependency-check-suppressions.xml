@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <!--
+    HookRelay Dependency-Check narrow suppressions, 2026-11-20.
+
+    Rules (AGENTS.md 4.5):
+    - Every entry identifies exactly one component (sha1) and one or more CVEs.
+    - Every entry states the justification, compensating controls, owner and review date.
+    - No wildcard CVE suppressions, no broad component suppressions without per-CVE justification.
+    - Every suppression expires on 2027-02-20 (90 days) and must be re-reviewed then.
+    - Owner: platform engineering.
+
+    Scope note: every suppressed component is build-time tooling only. None is part of the
+    deployed application runtime or the container image (Trivy image scan reports findings
+    solely for com.rabbitmq:amqp-client 5.31.0, fixed here by pinning 5.34.0 and NOT
+    suppressed).
+
+    Matcher reference: <sha1> is an exact SHA-1 of the dependency file, used because several
+    of these components are resolved without package-url identifiers, so GAV matching does
+    not apply to them.
+  -->
+
+  <!-- dependency-management-plugin 1.1.7 is a Gradle build plugin, not application code.
+       Latest release is 1.1.7; upstream provides no fixed version. The flagged Spring
+       Framework CVEs target Spring MVC/WebFlux applications, which this plugin is not.
+       Build runs in isolated CI with locked and verification-metadata-checked dependencies. -->
+  <suppress until="2027-02-20">
+    <notes>Build-time Gradle plugin (io.spring.gradle:dependency-management-plugin 1.1.7), not deployed application runtime; not present in the container image. Latest release 1.1.7 has no fixed version. Isolated CI build with locked, verified dependencies. Owner: platform engineering. Review: 2027-02-20.</notes>
+    <sha1>6afc1b5cbc631be173fe497b528d8154479e9371</sha1>
+    <cve>CVE-2018-1270</cve>
+    <cve>CVE-2022-22965</cve>
+    <cve>CVE-2026-47884</cve>
+    <cve>CVE-2026-47886</cve>
+    <cve>CVE-2026-47891</cve>
+    <cve>CVE-2026-59282</cve>
+    <cve>CVE-2026-59283</cve>
+    <cve>CVE-2024-22259</cve>
+    <cve>CVE-2016-9878</cve>
+    <cve>CVE-2018-11040</cve>
+    <cve>CVE-2026-47893</cve>
+  </suppress>
+
+  <!-- docker-java is an archived, unmaintained project; the findings below live on shaded
+       dependencies inside docker-java-transport-zerodep 3.7.1, used only by Gradle build
+       tooling (testcontainers-postgresql 2.0.5 brings it onto testCompileClasspath). The
+       component is not part of the deployed application or the container image. No fixed
+       release exists, so the component-level findings are documented and accepted for the
+       build environment only. -->
+  <suppress until="2027-02-20">
+    <notes>Build environment only: shaded dependency inside docker-java-transport-zerodep 3.7.1 (build tooling via testcontainers-postgresql). docker-java project is archived/unmaintained with no fixed release. Component is not part of the deployed application or container image. Owner: platform engineering. Review: 2027-02-20.</notes>
+    <sha1>65c367c5802c3ad030ef79fef924296d8e4990f4</sha1>
+    <cve>CVE-2026-71290</cve>
+    <cve>CVE-2026-64607</cve>
+  </suppress>
+  <suppress until="2027-02-20">
+    <notes>Build environment only: shaded dependency inside docker-java-transport-zerodep 3.7.1 (build tooling via testcontainers-postgresql). docker-java project is archived/unmaintained with no fixed release. Component is not part of the deployed application or container image. Owner: platform engineering. Review: 2027-02-20.</notes>
+    <sha1>498f1e71fffc835edc3e9a42b3bcfcf2a804f0f4</sha1>
+    <cve>CVE-2026-54399</cve>
+    <cve>CVE-2026-54428</cve>
+  </suppress>
+  <suppress until="2027-02-20">
+    <notes>Build environment only: shaded dependency inside docker-java-transport-zerodep 3.7.1 (build tooling via testcontainers-postgresql). docker-java project is archived/unmaintained with no fixed release. Component is not part of the deployed application or container image. Owner: platform engineering. Review: 2027-02-20.</notes>
+    <sha1>6cb5345bd550735be72fd0ece15bd2ca1ed27595</sha1>
+    <cve>CVE-2026-54399</cve>
+    <cve>CVE-2026-54428</cve>
+  </suppress>
+
+  <!-- Gradle 9.9.1 (approved baseline, AGENTS.md 2) bundles Kotlin 1.9.10; there is no
+       independent Kotlin upgrade path without upgrading Gradle. CVE-2026-53914 requires
+       build-cache metadata poisoning; builds run in isolated CI with locked dependencies. -->
+  <suppress until="2027-02-20">
+    <notes>Build environment only: Kotlin stdlib bundled by Gradle 9.9.1 (the approved baseline). No independent Kotlin upgrade path without a Gradle upgrade. CVE-2026-53914 requires build-cache metadata poisoning; builds run in isolated CI with locked, verified dependencies. Not part of the deployed application. Owner: platform engineering. Review: 2027-02-20.</notes>
+    <sha1>bc5bfc2690338defd5195b05c57562f2194eeb10</sha1>
+    <cve>CVE-2026-53914</cve>
+    <cve>CVE-2020-29582</cve>
+  </suppress>
+  <suppress until="2027-02-20">
+    <notes>Build environment only: Kotlin stdlib bundled by Gradle 9.9.1 (the approved baseline). No independent Kotlin upgrade path without a Gradle upgrade. CVE-2026-53914 requires build-cache metadata poisoning; builds run in isolated CI with locked, verified dependencies. Not part of the deployed application. Owner: platform engineering. Review: 2027-02-20.</notes>
+    <sha1>c7510d64a83411a649c76f2778304ddf71d7437b</sha1>
+    <cve>CVE-2026-53914</cve>
+    <cve>CVE-2020-29582</cve>
+  </suppress>
+
+  <!-- Confirmed false positive: CVE-2022-31691 concerns Spring Tools 4 for Eclipse (the IDE
+       plug-in), not Spring Boot Loader Tools (executable jar support library). -->
+  <suppress until="2027-02-20">
+    <notes>Confirmed false positive: CVE-2022-31691 affects Spring Tools 4 for Eclipse (IDE plug-in), not Spring Boot Loader Tools (spring-boot-loader-tools, executable jar support). Component is not affected. Owner: platform engineering. Review: 2027-02-20.</notes>
+    <sha1>093bdd9298ee284fb0a537906013408760b3916b</sha1>
+    <cve>CVE-2022-31691</cve>
+  </suppress>
+</suppressions>

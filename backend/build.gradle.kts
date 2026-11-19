@@ -41,6 +41,19 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-postgresql")
     testImplementation("org.testcontainers:testcontainers-rabbitmq")
+
+// Security override (documented, reviewed 2026-11-20): the Spring Boot 4.1.2 BOM
+// manages com.rabbitmq:amqp-client 5.31.0, affected by four High advisories:
+// CVE-2026-63337 (fixed 5.33.0), CVE-2026-69219 and CVE-2026-69220 (fixed 5.33.1),
+// CVE-2026-75516 (fixed 5.34.0). Spring Boot 4.1.2 is the latest 4.1.x patch, so no
+// Boot patch manages a fixed version. Pinning the managed transitive dependency is
+// therefore necessary and has a documented security reason (AGENTS.md 3.3/4.1).
+// RabbitMQ client 5.x remains backward compatible within the 5.x line; 5.33.0's
+// breaking changes (default hostname verification, stricter TLS defaults,
+// JSON-RPC allowlist) are compatible with Spring Boot's Rabbit auto-configuration.
+// Verified by the RabbitMQ container integration tests. Re-evaluate on any Boot
+// 4.1.x patch; amqp-client 5.37.1 is a newer candidate for the next review.
+implementation("com.rabbitmq:amqp-client:${libs.versions.rabbitmqAmqpClient.get()}")
 }
 
 // Reproducible dependency selection. Commit generated lock state after a trusted first resolution.
@@ -64,6 +77,10 @@ configure<org.owasp.dependencycheck.gradle.extension.DependencyCheckExtension> {
     scanBuildEnv = true
     formats = listOf("HTML", "JSON")
     nvd.apiKey.set(providers.environmentVariable("NVD_API_KEY").filter { it.isNotBlank() })
+    // Narrow, documented suppressions only (AGENTS.md 4.5): build-environment and
+    // false-positive findings are listed in gradle/dependency-check-suppressions.xml
+    // with per-CVE justification, owner and review date. No wildcard rules.
+    suppressionFile.set(rootProject.file("gradle/dependency-check-suppressions.xml").absolutePath)
 }
 
 tasks.withType<JavaCompile>().configureEach {
