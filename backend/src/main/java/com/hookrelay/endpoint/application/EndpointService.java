@@ -53,6 +53,9 @@ public class EndpointService {
     if (!signingSecretService.isConfigured())
       throw new com.hookrelay.security.SigningUnavailableException();
 
+    jdbcTemplate.queryForObject(
+        "SELECT id FROM projects WHERE id=? FOR UPDATE", UUID.class, projectId);
+    if (endpointRepository.countByProject(projectId) >= 1000) throw new EndpointCapacityException();
     String plaintextSecret = signingSecretService.generateSecret();
     SigningSecretService.EncryptedSecret encrypted = signingSecretService.encrypt(plaintextSecret);
 
