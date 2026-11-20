@@ -37,7 +37,7 @@ class SsrfSafeWebhookTransportTest {
   }
 
   @Test
-  void rejectsNonHttpsUrl() {
+  void givenNonHttpsUrl_whenSend_thenRejectedWithTransportException() {
     doThrow(new SsrfValidationException("URL scheme must be HTTPS"))
         .when(urlValidator)
         .validate("http://evil.com/hook");
@@ -53,7 +53,7 @@ class SsrfSafeWebhookTransportTest {
   }
 
   @Test
-  void rejectsNon443Port() {
+  void givenNon443Port_whenSend_thenRejectedWithTransportException() {
     doThrow(new SsrfValidationException("Only port 443 is allowed"))
         .when(urlValidator)
         .validate("https://evil.com:8080/hook");
@@ -69,7 +69,7 @@ class SsrfSafeWebhookTransportTest {
   }
 
   @Test
-  void rejectsUserInfo() {
+  void givenUserInfoInUrl_whenSend_thenRejectedWithTransportException() {
     doThrow(new SsrfValidationException("URL credentials are not allowed"))
         .when(urlValidator)
         .validate("https://user:pass@evil.com/hook");
@@ -85,7 +85,7 @@ class SsrfSafeWebhookTransportTest {
   }
 
   @Test
-  void rejectsFragment() {
+  void givenFragmentInUrl_whenSend_thenRejectedWithTransportException() {
     doThrow(new SsrfValidationException("URL fragments are not allowed"))
         .when(urlValidator)
         .validate("https://evil.com/hook#fragment");
@@ -101,7 +101,7 @@ class SsrfSafeWebhookTransportTest {
   }
 
   @Test
-  void rejectsPrivateAddressFromDns() throws Exception {
+  void givenPrivateDnsAnswer_whenSend_thenRejectedWithTransportException() throws Exception {
     doNothing().when(urlValidator).validate("https://8.8.8.8/hook");
 
     when(dnsResolver.resolve("evil.com"))
@@ -118,7 +118,7 @@ class SsrfSafeWebhookTransportTest {
   }
 
   @Test
-  void rejectsMixedDnsAnswers() throws Exception {
+  void givenMixedDnsAnswers_whenSend_thenRejectedWithTransportException() throws Exception {
     doNothing().when(urlValidator).validate("https://example.com/hook");
 
     when(dnsResolver.resolve("example.com"))
@@ -138,7 +138,7 @@ class SsrfSafeWebhookTransportTest {
   }
 
   @Test
-  void rejectsUnresolvableHost() throws Exception {
+  void givenUnresolvableHost_whenSend_thenRejectedWithTransportException() throws Exception {
     doNothing().when(urlValidator).validate("https://nonexistent.invalid/hook");
 
     doThrow(new UnknownHostException("Unable to resolve"))
@@ -156,7 +156,7 @@ class SsrfSafeWebhookTransportTest {
   }
 
   @Test
-  void generatesUniqueIds() {
+  void givenTwoRandomUuids_whenGenerated_thenTheyAreDistinct() {
     UUID id1 = UUID.randomUUID();
     UUID id2 = UUID.randomUUID();
     assertThat(id1).isNotEqualTo(id2);
