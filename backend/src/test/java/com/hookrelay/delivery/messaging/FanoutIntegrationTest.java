@@ -13,15 +13,19 @@ import com.hookrelay.event.application.EventIngestionService;
 import com.hookrelay.outbox.OutboxPublisher;
 import com.rabbitmq.client.Channel;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +37,7 @@ import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -42,6 +47,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.rabbitmq.RabbitMQContainer;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers
@@ -167,8 +173,7 @@ class FanoutIntegrationTest {
           var props = new MessageProperties();
           props.setContentType("application/json");
           props.setMessageId(rs.getString("id"));
-          return new Message(
-              rs.getString("payload").getBytes(java.nio.charset.StandardCharsets.UTF_8), props);
+          return new Message(rs.getString("payload").getBytes(StandardCharsets.UTF_8), props);
         },
         project,
         id);
@@ -298,7 +303,7 @@ class FanoutIntegrationTest {
         project,
         deleted);
     Message message = notification(event);
-    var altered = (tools.jackson.databind.node.ObjectNode) mapper.readTree(message.getBody());
+    var altered = (ObjectNode) mapper.readTree(message.getBody());
     altered.set("data", mapper.readTree("{\"untrusted\":true}"));
     service.process(
         parser.parse(
@@ -365,7 +370,7 @@ class FanoutIntegrationTest {
     var input = parser.parse(notification(event));
     var start = new CountDownLatch(1);
     try (var executor = Executors.newFixedThreadPool(4)) {
-      var tasks = new java.util.ArrayList<java.util.concurrent.Future<EventFanoutService.Result>>();
+      var tasks = new ArrayList<Future<EventFanoutService.Result>>();
       for (int i = 0; i < 4; i++)
         tasks.add(
             executor.submit(() -> {
@@ -424,7 +429,7 @@ class FanoutIntegrationTest {
       var received = channel.basicGet(QUEUE, false);
       assertThat(received).isNotNull();
       message.getMessageProperties().setDeliveryTag(received.getEnvelope().getDeliveryTag());
-      var acknowledged = new java.util.concurrent.atomic.AtomicBoolean();
+      var acknowledged = new AtomicBoolean();
       Channel observed =
           (Channel)
               java.lang.reflect.Proxy.newProxyInstance(
@@ -495,21 +500,18 @@ class FanoutIntegrationTest {
   void malformedOversizedForeignAndLegacyNotificationsGoToInternalDlq() {
     UUID event = event();
     Message valid = notification(event);
-    var foreign = (tools.jackson.databind.node.ObjectNode) mapper.readTree(valid.getBody());
+    var foreign = (ObjectNode) mapper.readTree(valid.getBody());
     foreign.put("projectId", foreignProject.toString());
-    var mismatch = (tools.jackson.databind.node.ObjectNode) mapper.readTree(valid.getBody());
+    var mismatch = (ObjectNode) mapper.readTree(valid.getBody());
     mismatch.put("eventType", "test.wrong");
     start();
-    send(
-        new Message(
-            "not json".getBytes(java.nio.charset.StandardCharsets.UTF_8),
-            valid.getMessageProperties()));
+    send(new Message("not json".getBytes(StandardCharsets.UTF_8), valid.getMessageProperties()));
     send(new Message(new byte[1024 * 1024 + 1], valid.getMessageProperties()));
     send(new Message(mapper.writeValueAsBytes(foreign), valid.getMessageProperties()));
     send(new Message(mapper.writeValueAsBytes(mismatch), valid.getMessageProperties()));
     send(
         new Message(
-            "{\"endpointId\":\"legacy\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            "{\"endpointId\":\"legacy\"}".getBytes(StandardCharsets.UTF_8),
             valid.getMessageProperties()));
     processed(5);
     await()
@@ -528,7 +530,7 @@ class FanoutIntegrationTest {
         "ALTER TABLE event_fanouts ADD CONSTRAINT test_reject_marker CHECK (recipient_count<0)");
     try {
       assertThatThrownBy(() -> service.process(parser.parse(notification(event))))
-          .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+          .isInstanceOf(DataIntegrityViolationException.class);
       assertThat(count("deliveries")).isZero();
       assertThat(count("delivery_cycles")).isZero();
       assertThat(count("event_fanouts")).isZero();
@@ -565,7 +567,7 @@ class FanoutIntegrationTest {
         "UPDATE events SET created_at='1999-01-01T00:00:00Z' WHERE project_id=? AND id=?",
         project,
         event);
-    var old = (tools.jackson.databind.node.ObjectNode) mapper.readTree(message.getBody());
+    var old = (ObjectNode) mapper.readTree(message.getBody());
     old.put("createdAt", "1999-01-01T00:00:00Z");
     assertThatThrownBy(() ->
             service.process(

@@ -7,7 +7,10 @@ import com.rabbitmq.client.Channel;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
+import java.sql.SQLException;
+import java.util.Set;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -28,6 +31,9 @@ import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.RecoverableDataAccessException;
 import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
+import org.springframework.transaction.TransactionTimedOutException;
 
 @Component
 @ConditionalOnProperty(prefix = "hookrelay.fanout", name = "enabled", havingValue = "true")
@@ -113,16 +119,15 @@ public final class FanoutConsumer implements ChannelAwareMessageListener, SmartL
       if (cause instanceof TransientDataAccessException
           || cause instanceof RecoverableDataAccessException
           || cause instanceof DataAccessResourceFailureException
-          || cause instanceof org.springframework.transaction.CannotCreateTransactionException
-          || cause instanceof org.springframework.transaction.TransactionSystemException
-          || cause instanceof org.springframework.transaction.TransactionTimedOutException)
-        return true;
+          || cause instanceof CannotCreateTransactionException
+          || cause instanceof TransactionSystemException
+          || cause instanceof TransactionTimedOutException) return true;
       // Spring's default translator can leave PostgreSQL lock timeouts uncategorized.
-      if (cause instanceof java.sql.SQLException sql) {
+      if (cause instanceof SQLException sql) {
         String state = sql.getSQLState();
         if (state != null
             && ((state.startsWith("08") || state.startsWith("53"))
-                || java.util.Set.of("40001", "40P01", "55P03", "57014", "57P01", "57P02", "57P03")
+                || Set.of("40001", "40P01", "55P03", "57014", "57P01", "57P02", "57P03")
                     .contains(state))) return true;
       }
     }
@@ -169,7 +174,7 @@ public final class FanoutConsumer implements ChannelAwareMessageListener, SmartL
                 TimeUnit.MILLISECONDS);
           }
         });
-      } catch (java.util.concurrent.RejectedExecutionException shutdown) {
+      } catch (RejectedExecutionException shutdown) {
         // Destruction can race the listener's last failure; channel closure redelivers it.
         if (running.get()) throw shutdown;
       }

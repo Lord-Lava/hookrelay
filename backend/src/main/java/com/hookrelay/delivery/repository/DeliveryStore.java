@@ -10,6 +10,7 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -385,8 +386,7 @@ public class DeliveryStore {
   }
 
   private Instant now() {
-    return jdbc.queryForObject("SELECT clock_timestamp()", java.time.OffsetDateTime.class)
-        .toInstant();
+    return jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime.class).toInstant();
   }
 
   private static boolean owns(Delivery d, UUID token, Instant now) {

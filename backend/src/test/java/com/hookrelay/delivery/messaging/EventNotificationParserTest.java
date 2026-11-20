@@ -6,12 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.hookrelay.delivery.application.FanoutProperties;
 import com.hookrelay.delivery.application.RejectedNotification;
 import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
+import org.springframework.jdbc.UncategorizedSQLException;
 import tools.jackson.databind.json.JsonMapper;
 
 class EventNotificationParserTest {
@@ -36,14 +38,14 @@ class EventNotificationParserTest {
         List.of("08006", "40001", "40P01", "55P03", "57014", "53300", "57P01", "57P02", "57P03"))
       assertThat(
               FanoutConsumer.retryable(
-                  new org.springframework.jdbc.UncategorizedSQLException(
-                      "test", "SELECT synthetic", new java.sql.SQLException("synthetic", state))))
+                  new UncategorizedSQLException(
+                      "test", "SELECT synthetic", new SQLException("synthetic", state))))
           .isTrue();
     for (String state : List.of("23505", "23503", "42601"))
       assertThat(
               FanoutConsumer.retryable(
-                  new org.springframework.jdbc.UncategorizedSQLException(
-                      "test", "SELECT synthetic", new java.sql.SQLException("synthetic", state))))
+                  new UncategorizedSQLException(
+                      "test", "SELECT synthetic", new SQLException("synthetic", state))))
           .isFalse();
     assertThat(FanoutConsumer.retryable(new IllegalStateException("synthetic"))).isFalse();
   }

@@ -135,6 +135,7 @@ Rules:
 - Do not use internal JDK packages (`sun.*`, `com.sun.*`, `jdk.internal.*`) or reflective access to JDK internals.
 - Do not import classes from a library's internal/implementation packages when a public API exists.
 - Remove unused imports and avoid wildcard imports in production source.
+- Use import statements for classes from other packages; do not use fully-qualified class names in method signatures, field declarations, variable declarations, catch clauses, `instanceof` checks, or annotations. Import the class and use its simple name. Use fully-qualified names only when necessary to resolve ambiguity between same-named classes from different packages.
 - Prefer standard Java APIs over third-party utilities for simple operations.
 - Do not add Lombok by default. Use records for immutable data carriers when appropriate and keep generated behavior explicit and debuggable.
 - Do not suppress compiler warnings globally. Fix the cause or narrowly suppress a documented unavoidable warning.

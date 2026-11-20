@@ -8,7 +8,12 @@ import com.hookrelay.endpoint.repository.WebhookEndpointRepository;
 import com.hookrelay.security.SigningSecretService;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -92,9 +97,9 @@ class EndpointServiceSigningSecretIntegrationTest {
         FROM generate_series(1,999) n
         """,
         projectId);
-    var start = new java.util.concurrent.CountDownLatch(1);
-    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
-      var tasks = new java.util.ArrayList<java.util.concurrent.Future<Boolean>>();
+    var start = new CountDownLatch(1);
+    try (var executor = Executors.newFixedThreadPool(2)) {
+      var tasks = new ArrayList<Future<Boolean>>();
       for (int i = 0; i < 2; i++) {
         int number = i;
         tasks.add(
@@ -110,7 +115,7 @@ class EndpointServiceSigningSecretIntegrationTest {
       }
       start.countDown();
       int created = 0;
-      for (var task : tasks) if (task.get(20, java.util.concurrent.TimeUnit.SECONDS)) created++;
+      for (var task : tasks) if (task.get(20, TimeUnit.SECONDS)) created++;
       assertThat(created).isEqualTo(1);
       assertThat(endpointRepository.countByProject(projectId)).isEqualTo(1000);
     }

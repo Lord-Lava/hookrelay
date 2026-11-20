@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Base64;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.InitializingBean;
@@ -189,7 +190,7 @@ class AesGcmSigningSecretServiceTest {
     String newKey = Base64.getEncoder().encodeToString(new byte[32]);
     var rotated =
         new AesGcmSigningSecretService(
-            new SigningProperties(newKey, "v2", java.util.Map.of("v1", TEST_KEY_BASE64)));
+            new SigningProperties(newKey, "v2", Map.of("v1", TEST_KEY_BASE64)));
     rotated.afterPropertiesSet();
     assertThat(rotated.decrypt(old.ciphertext(), old.nonce(), old.keyVersion()))
         .isEqualTo("whsec_retained");

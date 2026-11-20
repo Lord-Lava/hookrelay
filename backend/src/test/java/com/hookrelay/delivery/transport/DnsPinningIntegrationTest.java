@@ -9,12 +9,14 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.hookrelay.security.ssrf.DnsResolver;
 import com.hookrelay.security.ssrf.SsrfUrlValidator;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.HttpHost;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,14 +24,14 @@ import org.junit.jupiter.api.Test;
 class DnsPinningIntegrationTest {
 
   private SsrfUrlValidator urlValidator;
-  private com.hookrelay.security.ssrf.DnsResolver dnsResolver;
+  private DnsResolver dnsResolver;
   private WebhookTransportProperties properties;
   private CloseableHttpClient httpClient;
 
   @BeforeEach
   void setUp() {
     urlValidator = mock(SsrfUrlValidator.class);
-    dnsResolver = mock(com.hookrelay.security.ssrf.DnsResolver.class);
+    dnsResolver = mock(DnsResolver.class);
     properties =
         new WebhookTransportProperties(
             Duration.ofSeconds(3), Duration.ofSeconds(5), Duration.ofSeconds(15), 8192, 16, 4);
@@ -40,7 +42,7 @@ class DnsPinningIntegrationTest {
   void givenPublicDnsAnswer_whenSend_thenConnectionPinsToValidatedAddress() throws Exception {
     doNothing().when(urlValidator).validate("https://evil.com/hook");
 
-    com.hookrelay.security.ssrf.DnsResolver dnsResolver =
+    DnsResolver dnsResolver =
         host -> {
           if ("evil.com".equals(host)) {
             return new InetAddress[] {InetAddress.getByName("8.8.8.8")};
@@ -48,8 +50,7 @@ class DnsPinningIntegrationTest {
           throw new UnknownHostException("Unable to resolve: " + host);
         };
 
-    when(httpClient.execute(
-            any(HttpHost.class), any(org.apache.hc.core5.http.ClassicHttpRequest.class)))
+    when(httpClient.execute(any(HttpHost.class), any(ClassicHttpRequest.class)))
         .thenAnswer(invocation -> {
           HttpHost target = invocation.getArgument(0);
           assertThat(target.getAddress().getHostAddress()).isEqualTo("8.8.8.8");
@@ -71,7 +72,7 @@ class DnsPinningIntegrationTest {
   void givenMixedDnsAnswers_whenSend_thenRejectedWithoutConnectionAttempt() throws Exception {
     doNothing().when(urlValidator).validate("https://example.com/hook");
 
-    com.hookrelay.security.ssrf.DnsResolver dnsResolver =
+    DnsResolver dnsResolver =
         host -> {
           if ("example.com".equals(host)) {
             return new InetAddress[] {
@@ -88,15 +89,14 @@ class DnsPinningIntegrationTest {
         .isInstanceOf(TransportException.class)
         .hasMessageContaining("URL host is not allowed");
 
-    verify(httpClient, never())
-        .execute(any(HttpHost.class), any(org.apache.hc.core5.http.ClassicHttpRequest.class));
+    verify(httpClient, never()).execute(any(HttpHost.class), any(ClassicHttpRequest.class));
   }
 
   @Test
   void givenUnresolvableHost_whenSend_thenRejectedWithoutConnectionAttempt() throws Exception {
     doNothing().when(urlValidator).validate("https://nonexistent.invalid/hook");
 
-    com.hookrelay.security.ssrf.DnsResolver dnsResolver =
+    DnsResolver dnsResolver =
         host -> {
           throw new UnknownHostException("Unable to resolve: " + host);
         };
@@ -108,7 +108,6 @@ class DnsPinningIntegrationTest {
         .isInstanceOf(TransportException.class)
         .hasMessageContaining("Unable to resolve endpoint hostname");
 
-    verify(httpClient, never())
-        .execute(any(HttpHost.class), any(org.apache.hc.core5.http.ClassicHttpRequest.class));
+    verify(httpClient, never()).execute(any(HttpHost.class), any(ClassicHttpRequest.class));
   }
 }

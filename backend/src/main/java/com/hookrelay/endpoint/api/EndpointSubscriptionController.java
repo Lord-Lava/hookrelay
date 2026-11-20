@@ -2,6 +2,7 @@ package com.hookrelay.endpoint.api;
 
 import com.hookrelay.auth.TenantContext;
 import com.hookrelay.endpoint.application.EndpointSubscriptionService;
+import com.hookrelay.endpoint.domain.EndpointSubscription;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ResponseEntity;
@@ -55,7 +56,7 @@ public class EndpointSubscriptionController {
       throw new IllegalArgumentException("size must be between 1 and 100");
     }
     UUID projectId = TenantContext.require().projectId();
-    List<com.hookrelay.endpoint.domain.EndpointSubscription> subscriptions =
+    List<EndpointSubscription> subscriptions =
         subscriptionService.listSubscriptions(projectId, endpointId, page, size);
     int total = subscriptionService.countSubscriptions(projectId, endpointId);
     List<SubscriptionResponse> responses =

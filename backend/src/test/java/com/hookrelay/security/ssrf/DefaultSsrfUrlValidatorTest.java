@@ -2,6 +2,7 @@ package com.hookrelay.security.ssrf;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.net.UnknownHostException;
 import org.junit.jupiter.api.Test;
 
 class DefaultSsrfUrlValidatorTest {
@@ -222,7 +223,7 @@ class DefaultSsrfUrlValidatorTest {
     assertThatThrownBy(() ->
             new DefaultSsrfUrlValidator(
                     host -> {
-                      throw new java.net.UnknownHostException();
+                      throw new UnknownHostException();
                     })
                 .validate("https://this-host-does-not-exist-12345.invalid/webhook"))
         .isInstanceOf(SsrfValidationException.class)

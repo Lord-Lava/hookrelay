@@ -3,6 +3,7 @@ package com.hookrelay.delivery.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
@@ -63,7 +64,7 @@ class DeliveryStateTest {
 
   @Test
   void snapshotBytesCannotBeMutatedOrLogged() {
-    byte[] bytes = "{\"private\":true}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    byte[] bytes = "{\"private\":true}".getBytes(StandardCharsets.UTF_8);
     var snapshot =
         new FanoutSnapshot(UUID.randomUUID(), UUID.randomUUID(), Instant.now(), 0, "v1", bytes);
     byte[] original = bytes.clone();

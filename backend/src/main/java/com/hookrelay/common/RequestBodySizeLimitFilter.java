@@ -1,5 +1,6 @@
 package com.hookrelay.common;
 
+import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletInputStream;
@@ -45,9 +46,7 @@ public class RequestBodySizeLimitFilter extends OncePerRequestFilter {
 
   @Override
   protected void doFilterInternal(
-      HttpServletRequest request,
-      HttpServletResponse response,
-      jakarta.servlet.FilterChain filterChain)
+      HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
       throws ServletException, IOException {
     if (request.getContentLengthLong() > maxRequestBytes) {
       writeTooLarge(response);

@@ -1,9 +1,11 @@
 package com.hookrelay.delivery.transport;
 
+import com.hookrelay.security.ssrf.DnsResolver;
 import com.hookrelay.security.ssrf.SsrfUrlValidator;
 import com.hookrelay.security.ssrf.SsrfValidationException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
@@ -12,6 +14,7 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import javax.net.ssl.SSLException;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -43,13 +46,13 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
 
   private final CloseableHttpClient httpClient;
   private final SsrfUrlValidator urlValidator;
-  private final com.hookrelay.security.ssrf.DnsResolver dnsResolver;
+  private final DnsResolver dnsResolver;
   private final WebhookTransportProperties properties;
 
   @Autowired
   public SsrfSafeWebhookTransport(
       SsrfUrlValidator urlValidator,
-      com.hookrelay.security.ssrf.DnsResolver dnsResolver,
+      DnsResolver dnsResolver,
       WebhookTransportProperties properties) {
     this.httpClient = buildHttpClient(properties);
     this.urlValidator = urlValidator;
@@ -61,7 +64,7 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
   SsrfSafeWebhookTransport(
       CloseableHttpClient httpClient,
       SsrfUrlValidator urlValidator,
-      com.hookrelay.security.ssrf.DnsResolver dnsResolver,
+      DnsResolver dnsResolver,
       WebhookTransportProperties properties) {
     this.httpClient = httpClient;
     this.urlValidator = urlValidator;
@@ -198,7 +201,7 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
     } catch (UnknownHostException e) {
       // Permanent infrastructure failure - DNS cannot resolve.
       throw new TransportException("Unable to resolve endpoint hostname", e);
-    } catch (javax.net.ssl.SSLException e) {
+    } catch (SSLException e) {
       // Permanent security failure - TLS hostname or certificate verification failed.
       throw new TransportException("TLS verification failed: " + e.getMessage(), e);
     } catch (IOException e) {
@@ -226,7 +229,7 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
   private static InetAddress selectAddress(InetAddress[] addresses) {
     // Prefer IPv4 over IPv6 for compatibility; fall back to the first address.
     for (InetAddress address : addresses) {
-      if (address instanceof java.net.Inet4Address) {
+      if (address instanceof Inet4Address) {
         return address;
       }
     }

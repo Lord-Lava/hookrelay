@@ -5,23 +5,28 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.time.Instant;
+import java.util.Map;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import tools.jackson.databind.ObjectMapper;
 
 @Component
-@org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE + 10)
+@Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
   private final ApiKeyAuthService apiKeyAuthService;
   private final AuthenticationEntryPoint authenticationEntryPoint;
   private final ProjectRateLimiter rateLimiter;
-  private final tools.jackson.databind.ObjectMapper mapper;
+  private final ObjectMapper mapper;
 
   public ApiKeyAuthenticationFilter(
       ApiKeyAuthService apiKeyAuthService,
       AuthenticationEntryPoint authenticationEntryPoint,
       ProjectRateLimiter rateLimiter,
-      tools.jackson.databind.ObjectMapper mapper) {
+      ObjectMapper mapper) {
     this.apiKeyAuthService = apiKeyAuthService;
     this.authenticationEntryPoint = authenticationEntryPoint;
     this.rateLimiter = rateLimiter;
@@ -52,7 +57,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
       response.setContentType("application/problem+json");
       mapper.writeValue(
           response.getOutputStream(),
-          java.util.Map.of(
+          Map.of(
               "type",
               "about:blank",
               "title",
@@ -62,7 +67,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
               "detail",
               "Project request limit exceeded",
               "timestamp",
-              java.time.Instant.now()));
+              Instant.now()));
       return;
     }
     TenantContext.set(identity.get());

@@ -9,8 +9,13 @@ import com.hookrelay.endpoint.repository.EndpointSubscriptionRepository;
 import com.hookrelay.endpoint.repository.WebhookEndpointRepository;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -302,11 +307,9 @@ class EndpointSubscriptionServiceIntegrationTest {
 
   @Test
   void concurrentPutsReturnOneSubscription() throws Exception {
-    var start = new java.util.concurrent.CountDownLatch(1);
-    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
-      var futures =
-          new java.util.ArrayList<
-              java.util.concurrent.Future<EndpointSubscriptionService.SubscriptionResult>>();
+    var start = new CountDownLatch(1);
+    try (var executor = Executors.newFixedThreadPool(8)) {
+      var futures = new ArrayList<Future<EndpointSubscriptionService.SubscriptionResult>>();
       for (int i = 0; i < 8; i++)
         futures.add(
             executor.submit(() -> {
@@ -315,8 +318,8 @@ class EndpointSubscriptionServiceIntegrationTest {
                   projectId, endpointId, "race.event");
             }));
       start.countDown();
-      var results = new java.util.ArrayList<EndpointSubscriptionService.SubscriptionResult>();
-      for (var f : futures) results.add(f.get(15, java.util.concurrent.TimeUnit.SECONDS));
+      var results = new ArrayList<EndpointSubscriptionService.SubscriptionResult>();
+      for (var f : futures) results.add(f.get(15, TimeUnit.SECONDS));
       assertThat(results.stream().map(r -> r.response().id()).distinct()).hasSize(1);
       assertThat(results.stream().filter(EndpointSubscriptionService.SubscriptionResult::created))
           .hasSize(1);
