@@ -54,6 +54,14 @@ dependencies {
 // Verified by the RabbitMQ container integration tests. Re-evaluate on any Boot
 // 4.1.x patch; amqp-client 5.37.1 is a newer candidate for the next review.
 implementation("com.rabbitmq:amqp-client:${libs.versions.rabbitmqAmqpClient.get()}")
+
+// Apache HttpClient 5 for SSRF-safe outbound webhook delivery (Phase 3 Step 3).
+// Spring Boot 4.1.2 BOM does not manage httpclient5; pinned explicitly.
+// Apache HttpClient 5.6.x is actively maintained, widely used, and supported by
+// Spring Framework 6.x/7.x through HttpComponentsClientHttpRequestFactory.
+// Provides connection-level control needed for address pinning, TLS enforcement,
+// redirect disabling, and bounded response-body consumption.
+implementation("org.apache.httpcomponents.client5:httpclient5:${libs.versions.apacheHttpClient5.get()}")
 }
 
 // Reproducible dependency selection. Commit generated lock state after a trusted first resolution.
