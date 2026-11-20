@@ -1,20 +1,28 @@
 package com.hookrelay.delivery.transport;
 
 import com.hookrelay.security.ssrf.SsrfUrlValidator;
+import com.hookrelay.security.ssrf.SsrfValidationException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
+import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
+import org.apache.hc.core5.util.TimeValue;
+import org.apache.hc.core5.util.Timeout;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
 
 /**
  * SSRF-safe outbound webhook transport.
@@ -26,9 +34,9 @@ import org.springframework.web.client.RestClient;
  */
 @Component
 @EnableConfigurationProperties(WebhookTransportProperties.class)
-public class SsrfSafeWebhookTransport implements WebhookTransport {
+public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBean {
 
-  private final RestClient restClient;
+  private final CloseableHttpClient httpClient;
   private final SsrfUrlValidator urlValidator;
   private final com.hookrelay.security.ssrf.DnsResolver dnsResolver;
   private final WebhookTransportProperties properties;
@@ -38,38 +46,48 @@ public class SsrfSafeWebhookTransport implements WebhookTransport {
       SsrfUrlValidator urlValidator,
       com.hookrelay.security.ssrf.DnsResolver dnsResolver,
       WebhookTransportProperties properties) {
-    this(buildRestClient(properties), urlValidator, dnsResolver, properties);
-  }
-
-  /** Package-visible constructor for testing with an injected RestClient. */
-  SsrfSafeWebhookTransport(
-      RestClient restClient,
-      SsrfUrlValidator urlValidator,
-      com.hookrelay.security.ssrf.DnsResolver dnsResolver,
-      WebhookTransportProperties properties) {
-    this.restClient = restClient;
+    this.httpClient = buildHttpClient(properties);
     this.urlValidator = urlValidator;
     this.dnsResolver = dnsResolver;
     this.properties = properties;
   }
 
-  private static RestClient buildRestClient(WebhookTransportProperties properties) {
-    CloseableHttpClient httpClient =
-        HttpClients.custom()
-            .setConnectionReuseStrategy((request, response, context) -> false)
-            .disableAutomaticRetries()
-            .disableRedirectHandling()
-            .disableCookieManagement()
-            .disableAuthCaching()
-            .evictExpiredConnections()
+  /** Package-visible constructor for testing with an injected HttpClient. */
+  SsrfSafeWebhookTransport(
+      CloseableHttpClient httpClient,
+      SsrfUrlValidator urlValidator,
+      com.hookrelay.security.ssrf.DnsResolver dnsResolver,
+      WebhookTransportProperties properties) {
+    this.httpClient = httpClient;
+    this.urlValidator = urlValidator;
+    this.dnsResolver = dnsResolver;
+    this.properties = properties;
+  }
+
+  private static CloseableHttpClient buildHttpClient(WebhookTransportProperties properties) {
+    PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager();
+    connectionManager.setMaxTotal(properties.maxConnections());
+    connectionManager.setDefaultMaxPerRoute(properties.maxConnectionsPerRoute());
+
+    RequestConfig requestConfig =
+        RequestConfig.custom()
+            .setConnectionRequestTimeout(
+                Timeout.ofMilliseconds(properties.connectTimeout().toMillis()))
+            .setConnectTimeout(Timeout.ofMilliseconds(properties.connectTimeout().toMillis()))
+            .setResponseTimeout(Timeout.ofMilliseconds(properties.responseTimeout().toMillis()))
             .build();
 
-    HttpComponentsClientHttpRequestFactory requestFactory =
-        new HttpComponentsClientHttpRequestFactory(httpClient);
-    requestFactory.setConnectionRequestTimeout((int) properties.connectTimeout().toMillis());
-    requestFactory.setReadTimeout((int) properties.responseTimeout().toMillis());
-
-    return RestClient.builder().requestFactory(requestFactory).build();
+    return HttpClients.custom()
+        .setConnectionManager(connectionManager)
+        .setDefaultRequestConfig(requestConfig)
+        .setConnectionReuseStrategy((request, response, context) -> false)
+        .disableAutomaticRetries()
+        .disableRedirectHandling()
+        .disableCookieManagement()
+        .disableAuthCaching()
+        .evictExpiredConnections()
+        .evictIdleConnections(TimeValue.ofMilliseconds(0))
+        .build();
   }
 
   @Override
@@ -78,35 +96,34 @@ public class SsrfSafeWebhookTransport implements WebhookTransport {
       // Defense in depth: validate URL at delivery time too.
       urlValidator.validate(url);
 
-      // Resolve and validate DNS at connection time. Every address must pass the
-      // public-address policy; a single unsafe address rejects the hostname.
-      String host = extractHost(url);
-      InetAddress[] addresses;
-      try {
-        addresses = dnsResolver.resolve(host);
-      } catch (UnknownHostException e) {
-        throw new TransportException("Unable to resolve endpoint hostname: " + host, e);
-      }
-      if (addresses == null || addresses.length == 0) {
-        throw new TransportException("No addresses resolved for " + host);
-      }
-      for (InetAddress address : addresses) {
-        SsrfAddressValidator.validate(address);
-      }
+      URI uri = new URI(url);
+      int port = uri.getPort() == -1 ? 443 : uri.getPort();
+      String path = uri.getPath() + (uri.getQuery() != null ? "?" + uri.getQuery() : "");
 
-      return restClient
-          .post()
-          .uri(url)
-          .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-          .body(body)
-          .exchange(
-              (request, response) -> {
-                int statusCode = response.getStatusCode().value();
-                String responseBody =
-                    readBounded(response.getBody(), properties.maxResponseBodyBytes());
-                return new TransportResult(statusCode, responseBody, Instant.now());
-              },
-              false);
+      HttpPost httpPost = new HttpPost(path);
+      httpPost.setHeader("Host", uri.getHost());
+      httpPost.setEntity(new ByteArrayEntity(body, ContentType.APPLICATION_JSON));
+
+      // HttpClient uses the project's DnsResolver (configured above), which resolves and validates
+      // every address. The connection is therefore pinned to a validated address, preventing DNS
+      // rebinding and mixed-answer attacks.
+      try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+        int statusCode = response.getCode();
+        String responseBody = readBounded(response.getEntity(), properties.maxResponseBodyBytes());
+        return new TransportResult(statusCode, responseBody, Instant.now());
+      }
+    } catch (SsrfValidationException e) {
+      // Permanent policy failure - URL validation or DNS address policy rejected.
+      throw new TransportException("URL validation failed: " + e.getMessage(), e);
+    } catch (UnknownHostException e) {
+      // Permanent infrastructure failure - DNS cannot resolve.
+      throw new TransportException("Unable to resolve endpoint hostname", e);
+    } catch (javax.net.ssl.SSLException e) {
+      // Permanent security failure - TLS hostname or certificate verification failed.
+      throw new TransportException("TLS verification failed: " + e.getMessage(), e);
+    } catch (IOException e) {
+      // Transient infrastructure failure - may be retried by caller.
+      throw new TransportException("Transport I/O failure: " + e.getMessage(), e);
     } catch (Exception e) {
       throw new TransportException("Transport failure: " + e.getMessage(), e);
     }
@@ -126,22 +143,35 @@ public class SsrfSafeWebhookTransport implements WebhookTransport {
     return host;
   }
 
-  private String readBounded(InputStream inputStream, int maxBytes) {
-    if (inputStream == null) {
+  private String readBounded(HttpEntity entity, int maxBytes) throws TransportException {
+    if (entity == null) {
       return "";
     }
-    try {
-      byte[] buffer = new byte[maxBytes + 1];
-      int read = inputStream.read(buffer);
-      if (read <= 0) {
+    try (InputStream inputStream = entity.getContent()) {
+      if (inputStream == null) {
         return "";
       }
-      if (read > maxBytes) {
-        return new String(buffer, 0, maxBytes, StandardCharsets.UTF_8) + " [truncated]";
+      byte[] buffer = new byte[maxBytes + 1];
+      int totalRead = 0;
+      int read;
+      while ((read = inputStream.read(buffer, totalRead, buffer.length - totalRead)) > 0) {
+        totalRead += read;
+        if (totalRead > maxBytes) {
+          return new String(buffer, 0, maxBytes, StandardCharsets.UTF_8) + " [truncated]";
+        }
       }
-      return new String(buffer, 0, read, StandardCharsets.UTF_8);
+      return new String(buffer, 0, totalRead, StandardCharsets.UTF_8);
     } catch (IOException e) {
-      return "[unable to read response: " + e.getMessage() + "]";
+      throw new TransportException("Failed to read response body: " + e.getMessage(), e);
+    }
+  }
+
+  @Override
+  public void destroy() {
+    try {
+      httpClient.close();
+    } catch (IOException e) {
+      // Best-effort close; log and continue.
     }
   }
 }

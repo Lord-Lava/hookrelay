@@ -21,7 +21,7 @@ public record WebhookTransportProperties(
   public WebhookTransportProperties {
     connectTimeout = connectTimeout == null ? Duration.ofSeconds(3) : connectTimeout;
     responseTimeout = responseTimeout == null ? Duration.ofSeconds(5) : responseTimeout;
-    totalTimeout = totalTimeout == null ? Duration.ofSeconds(15) : responseTimeout;
+    totalTimeout = totalTimeout == null ? Duration.ofSeconds(15) : totalTimeout;
     maxResponseBodyBytes = maxResponseBodyBytes <= 0 ? 8192 : maxResponseBodyBytes;
     maxConnections = maxConnections <= 0 ? 16 : maxConnections;
     maxConnectionsPerRoute = maxConnectionsPerRoute <= 0 ? 4 : maxConnectionsPerRoute;

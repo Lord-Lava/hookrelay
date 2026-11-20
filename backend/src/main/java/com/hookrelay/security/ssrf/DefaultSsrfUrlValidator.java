@@ -75,7 +75,7 @@ public class DefaultSsrfUrlValidator implements SsrfUrlValidator {
     for (InetAddress address : addresses) validateAddress(address);
   }
 
-  private static void validateAddress(InetAddress address) {
+  public static void validateAddress(InetAddress address) {
     if (address == null
         || address.isAnyLocalAddress()
         || address.isLoopbackAddress()
