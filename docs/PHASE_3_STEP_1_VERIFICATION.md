@@ -34,6 +34,9 @@ ceiling bounds new cycle deadlines, but deletion/retention jobs are still future
 
 ## Contracts for the next steps
 
+Step 2 is now implemented; see [its rollout and verification record](PHASE_3_STEP_2_VERIFICATION.md).
+The following describes the original Step 1 boundary.
+
 Step 2 must select eligible active subscriptions under the same transaction and
 event row lock used for fan-out persistence. The current store accepts already-selected
 internal endpoint IDs and rechecks ownership/active state. It is not a subscription

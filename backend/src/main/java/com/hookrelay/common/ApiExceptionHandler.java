@@ -53,9 +53,11 @@ public class ApiExceptionHandler {
         .body(problem(HttpStatus.NOT_FOUND, exception.getMessage()));
   }
 
-  @ExceptionHandler(EndpointAlreadyExistsException.class)
-  public ResponseEntity<ProblemDetail> handleEndpointAlreadyExists(
-      EndpointAlreadyExistsException exception) {
+  @ExceptionHandler({
+    EndpointAlreadyExistsException.class,
+    com.hookrelay.endpoint.application.EndpointCapacityException.class
+  })
+  public ResponseEntity<ProblemDetail> handleEndpointAlreadyExists(RuntimeException exception) {
     return ResponseEntity.status(HttpStatus.CONFLICT)
         .body(problem(HttpStatus.CONFLICT, exception.getMessage()));
   }

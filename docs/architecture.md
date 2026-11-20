@@ -75,7 +75,7 @@ Secret rotation immediately replaces the webhook secret. It writes a minimal imm
 `endpoint_audit_events` row in the same transaction; no secret values are recorded. V6 moves
 historical rotation outbox rows into that table. Outbox rows are now constrained to EVENT_INGESTED.
 Previously published rotation messages may already be in a broker queue: drain/quarantine them
-before enabling a future ingestion consumer. A migration cannot retract an already published message.
+before enabling the opt-in ingestion consumer. A migration cannot retract an already published message.
 
 ## ADR-011: HTTP limits and management exposure
 
@@ -118,11 +118,11 @@ URLs are never updated by these repositories. No signing secrets or response bod
 are stored. The marker is an insert-only application contract, not a PostgreSQL trigger
 that prevents a database administrator from modifying rows.
 
-Recipient selection is not implemented. Step 2 must select active subscriptions in
-the same event-locked transaction; the snapshot is at first committed fan-out processing,
+Step 2 now selects active subscriptions in
+the same event-locked transaction (see ADR-013); the snapshot is at first committed fan-out processing,
 not ingestion. An existing marker returns its original bytes and recipients without
-adding later subscribers. The current store validates the supplied internal recipient
-IDs against project ownership and active endpoint state.
+adding later subscribers. The explicit-recipient persistence entry point validates internal recipient IDs; the
+consumer uses the set-based subscription selection described below.
 
 `DeliveryStore` provides scoped, bounded reads and guarded claim/start/completion,
 lease-expiry recovery, cancellation and horizon expiry. Mutation lock order is project
@@ -145,3 +145,50 @@ locks before deployment. Details and actual test outcomes are in
 [Step 1 verification](PHASE_3_STEP_1_VERIFICATION.md); the
 [Phase 3 prompts and architecture reference](PHASE_3_WEBHOOK_DELIVERY_ENGINE.md) remain
 intact for subsequent implementation.
+
+
+## ADR-013: Transactional fan-out and manual broker acknowledgement (Phase 3 Step 2)
+
+`EventNotificationParser` validates the existing five-field JSON envelope and outbox
+message ID, rejects bodies over 1 MiB before parsing, duplicate keys, trailing JSON,
+unknown fields and invalid metadata. `EventFanoutService` verifies scoped outbox
+ownership/type/aggregate, locks the event and checks its type/time. It ignores broker
+payload values for delivery construction and freezes body v1 from PostgreSQL:
+`eventId`, `eventType`, `createdAt`, `data`; internal `projectId` is omitted.
+
+The service owns a REQUIRES_NEW READ COMMITTED transaction with a 10-second timeout,
+2-second lock timeout and 10-second SQL statement timeout. `FanoutStore` uses one
+materialized recipient-selection/INSERT statement to capture exact-match active
+subscriptions on enabled, nondeleted endpoints in the event's project. Deliveries,
+initial cycles and the marker/body commit atomically. Concurrent edits after the
+selection statement do not alter this snapshot, even before commit. Event locking
+and database pair uniqueness make redelivery idempotent; empty snapshots remain final.
+The set-based path rejects overflow above 1,000 recipients without partial inserts.
+Endpoint creation locks its project before checking the 1,000-nondeleted-endpoint cap.
+Deletion frees capacity; disabled endpoints still count. Overflow creation returns 409.
+
+`FanoutConsumer` owns a Spring AMQP MANUAL container (default two consumers, prefetch
+ten each). It calls `basicAck(tag,false)` only after the service returns from commit.
+There is no listener-side HTTP, DNS or broker call inside the database transaction.
+Malformed, foreign, historical and deterministic invariant failures are rejected once
+without requeue to the existing internal broker DLQ. This creates no customer DLQ entry.
+
+Transient connection/resource/transaction failures, lock timeouts and deadlocks pause
+the container. A single bounded supervisor closes consumers, leaving failed work
+unacknowledged for broker redelivery, and restarts after exponential 1–60-second delay
+with jitter. PostgreSQL SQLSTATE checks cover failures Spring leaves uncategorized,
+including lock timeout, shutdown and insufficient resources. No database transaction
+or listener thread sleeps for backoff. Successful ACK resets recovery backoff. A crash
+between commit and ACK can redeliver, but the committed marker prevents new recipients.
+Bounded `hookrelay.fanout.messages{outcome=...}` counters report results without tenant,
+URL or event labels; diagnostics omit payloads and SQL exception messages.
+
+Fan-out is disabled by default and uses its own validated `hookrelay.fanout` properties.
+Activation requires both a reviewed-rollout flag and an explicit acceptance cutoff.
+Unprocessed older events are quarantined, not silently suppressed with zero-recipient
+markers. Broker byte/overflow policies, legacy-message review and backlog decisions
+remain deployment gates. `findPublishedWithoutSnapshot(projectId,limit)` provides
+bounded operator reconciliation (60-second grace, at most 100 IDs, five-second query
+limit); there is no automatic republish or retention job. No new schema migration or
+dependency was required; V8–V11 supply the persistence invariants. See
+[Step 2 rollout and verification](PHASE_3_STEP_2_VERIFICATION.md).
