@@ -84,7 +84,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   }
 
   @Test
-  void endpointCapacityIsSerializedAcrossConcurrentCreates() throws Exception {
+  void givenProjectAtEndpointLimit_whenCreatingConcurrently_thenOnlyOneCreated() throws Exception {
     jdbcTemplate.update(
         """
         INSERT INTO endpoints(id,project_id,url,signing_secret_ciphertext,enabled)
@@ -117,7 +117,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   }
 
   @Test
-  void createEndpointReturnsPlaintextSecretOnce() {
+  void givenEndpointCreated_whenReadSecret_thenReturnsPlaintextOnce() {
     EndpointService.CreatedEndpointResult result =
         endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
 
@@ -127,7 +127,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   }
 
   @Test
-  void plaintextSecretIsNotStoredInDatabase() {
+  void givenEndpointCreated_whenInspectingStoredFields_thenNoPlaintextStored() {
     EndpointService.CreatedEndpointResult result =
         endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
 
@@ -145,7 +145,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   }
 
   @Test
-  void getSigningSecretDecryptsStoredCiphertext() {
+  void givenEndpointCreated_whenGettingStoredSecret_thenDecryptsCiphertext() {
     EndpointService.CreatedEndpointResult result =
         endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
 
@@ -154,13 +154,13 @@ class EndpointServiceSigningSecretIntegrationTest {
   }
 
   @Test
-  void getSigningSecretRejectsUnknownEndpoint() {
+  void givenUnknownEndpoint_whenGettingStoredSecret_thenRejects() {
     assertThatThrownBy(() -> endpointService.getSigningSecret(UUID.randomUUID(), projectId))
         .isInstanceOf(EndpointNotFoundException.class);
   }
 
   @Test
-  void encryptDecryptRoundTripThroughService() {
+  void givenPlaintext_whenEncryptDecryptThroughService_thenReturnsOriginal() {
     String plaintext = "whsec_integration_test_secret";
     SigningSecretService.EncryptedSecret encrypted = signingSecretService.encrypt(plaintext);
 
@@ -170,7 +170,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   }
 
   @Test
-  void listEndpointsDoesNotExposePlaintextSecret() {
+  void givenEndpointCreated_whenListingEndpoints_thenNoPlaintextExposed() {
     endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
 
     var endpoints = endpointService.listEndpoints(projectId, 0, 20);
@@ -181,7 +181,7 @@ class EndpointServiceSigningSecretIntegrationTest {
   }
 
   @Test
-  void crossProjectCannotReadSigningSecret() {
+  void givenOtherProject_whenReadingSecret_thenRejects() {
     EndpointService.CreatedEndpointResult result =
         endpointService.createEndpoint(projectId, "https://8.8.4.10/webhook", "Test");
 

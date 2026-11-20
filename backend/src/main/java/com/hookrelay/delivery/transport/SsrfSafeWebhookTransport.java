@@ -9,6 +9,9 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -92,8 +95,48 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
         .build();
   }
 
+  private static final Set<String> RESERVED_HEADERS =
+      Set.of(
+          "Host",
+          "Authorization",
+          "Cookie",
+          "Content-Length",
+          "Content-Type",
+          "Transfer-Encoding",
+          "TE",
+          "Trailer",
+          "Upgrade",
+          "Connection",
+          "Keep-Alive",
+          "Proxy-Authorization",
+          "Proxy-Connection",
+          "Sec-WebSocket-Key",
+          "Sec-WebSocket-Version",
+          "Sec-WebSocket-Accept",
+          "Sec-WebSocket-Extensions",
+          "Sec-WebSocket-Protocol");
+
+  private static final Set<String> SIGNING_HEADERS =
+      Set.of("webhook-id", "webhook-timestamp", "webhook-signature");
+
   @Override
   public TransportResult send(String url, byte[] body) throws TransportException {
+    return send(url, body, Map.of());
+  }
+
+  /**
+   * Sends an HTTP POST request with additional headers.
+   *
+   * @param url the destination URL (HTTPS only, port 443)
+   * @param body the request body bytes
+   * @param headers additional HTTP headers to include in the request; only {@code webhook-id},
+   *     {@code webhook-timestamp} and {@code webhook-signature} are accepted, and
+   *     reserved/transport headers are rejected
+   * @return the transport result with status code and bounded body preview
+   * @throws TransportException if the request cannot be sent safely or fails
+   */
+  public TransportResult send(String url, byte[] body, Map<String, String> headers)
+      throws TransportException {
     try {
       // Defense in depth: validate URL at delivery time too.
       urlValidator.validate(url);
@@ -131,6 +174,18 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
       HttpPost httpPost = new HttpPost(path);
       httpPost.setHeader("Host", uri.getHost());
       httpPost.setEntity(new ByteArrayEntity(body, ContentType.APPLICATION_JSON));
+      if (headers != null) {
+        for (Map.Entry<String, String> entry : headers.entrySet()) {
+          String lower = entry.getKey().toLowerCase(Locale.ROOT);
+          if (RESERVED_HEADERS.contains(lower)) {
+            throw new TransportException("Reserved header is not allowed: " + entry.getKey());
+          }
+          if (!SIGNING_HEADERS.contains(lower)) {
+            throw new TransportException("Header is not allowed: " + entry.getKey());
+          }
+          httpPost.setHeader(entry.getKey(), entry.getValue());
+        }
+      }
 
       try (CloseableHttpResponse response = httpClient.execute(target, httpPost)) {
         int statusCode = response.getCode();

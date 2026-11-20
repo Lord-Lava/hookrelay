@@ -471,6 +471,10 @@ A production-oriented change is incomplete without tests that prove its behavior
 - Test concurrent idempotency and tenant-isolation races.
 - Use realistic but synthetic data. Never use actual credentials or customer payloads.
 - Ensure tests clean up containers, queues, temporary files, and threads.
+- Name all test methods using **BDD `givenX_whenY_thenZ` convention** — the method name should read as "given [precondition], when [action], then [expected outcome]":
+  - `givenValidEvent_whenIngested_thenCreatesEventAndOutbox`
+  - givenRevokedApiKey_whenIngested_thenRejected
+  - givenConcurrentRequests_whenSameIdempotencyKey_thenCreatesOneEvent
 
 ### 12.3 Before declaring a task complete
 
