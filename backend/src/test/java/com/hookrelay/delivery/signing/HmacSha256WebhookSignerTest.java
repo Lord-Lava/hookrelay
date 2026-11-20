@@ -32,7 +32,7 @@ class HmacSha256WebhookSignerTest {
       "{\"eventType\":\"test.created\",\"data\":{}}".getBytes(StandardCharsets.UTF_8);
 
   @Test
-  void signWithWhsecPrefixProducesValidSignature() {
+  void givenSecretWithWhsecPrefix_whenSigning_thenProducesValidV1Signature() {
     String signature = signer.sign(deliveryId, timestamp, body, TEST_SECRET);
 
     assertThat(signature).startsWith("v1,");
@@ -42,7 +42,7 @@ class HmacSha256WebhookSignerTest {
   }
 
   @Test
-  void signWithoutWhsecPrefixProducesValidSignature() {
+  void givenSecretWithoutWhsecPrefix_whenSigning_thenProducesValidV1Signature() {
     String secretWithoutPrefix = TEST_SECRET.substring("whsec_".length());
     String signature = signer.sign(deliveryId, timestamp, body, secretWithoutPrefix);
 
@@ -53,7 +53,7 @@ class HmacSha256WebhookSignerTest {
   }
 
   @Test
-  void sameInputProducesSameSignature() {
+  void givenSameInputs_whenSigningTwice_thenProducesSameSignature() {
     String sig1 = signer.sign(deliveryId, timestamp, body, TEST_SECRET);
     String sig2 = signer.sign(deliveryId, timestamp, body, TEST_SECRET);
 
@@ -61,7 +61,7 @@ class HmacSha256WebhookSignerTest {
   }
 
   @Test
-  void differentDeliveryIdProducesDifferentSignature() {
+  void givenDifferentDeliveryIds_whenSigningSameBody_thenProducesDifferentSignatures() {
     UUID otherId = UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     String sig1 = signer.sign(deliveryId, timestamp, body, TEST_SECRET);
     String sig2 = signer.sign(otherId, timestamp, body, TEST_SECRET);
@@ -70,7 +70,7 @@ class HmacSha256WebhookSignerTest {
   }
 
   @Test
-  void differentTimestampProducesDifferentSignature() {
+  void givenDifferentTimestamps_whenSigningSameDelivery_thenProducesDifferentSignatures() {
     long otherTime = timestamp + 3600;
     String sig1 = signer.sign(deliveryId, timestamp, body, TEST_SECRET);
     String sig2 = signer.sign(deliveryId, otherTime, body, TEST_SECRET);
@@ -79,7 +79,7 @@ class HmacSha256WebhookSignerTest {
   }
 
   @Test
-  void differentBodyProducesDifferentSignature() {
+  void givenDifferentBodies_whenSigningSameDelivery_thenProducesDifferentSignatures() {
     byte[] otherBody =
         "{\"eventType\":\"test.other\",\"data\":{}}".getBytes(StandardCharsets.UTF_8);
     String sig1 = signer.sign(deliveryId, timestamp, body, TEST_SECRET);
@@ -89,7 +89,7 @@ class HmacSha256WebhookSignerTest {
   }
 
   @Test
-  void differentSecretProducesDifferentSignature() {
+  void givenDifferentSecrets_whenSigningSameDelivery_thenProducesDifferentSignatures() {
     byte[] otherKeyBytes = new byte[32];
     for (int i = 0; i < 32; i++) {
       otherKeyBytes[i] = (byte) (255 - i);
@@ -102,49 +102,49 @@ class HmacSha256WebhookSignerTest {
   }
 
   @Test
-  void signWithNullDeliveryIdThrows() {
+  void givenNullDeliveryId_whenSigning_thenThrowsIllegalArgumentException() {
     assertThatThrownBy(() -> signer.sign(null, timestamp, body, TEST_SECRET))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("deliveryId");
   }
 
   @Test
-  void signWithNullBodyThrows() {
+  void givenNullBody_whenSigning_thenThrowsIllegalArgumentException() {
     assertThatThrownBy(() -> signer.sign(deliveryId, timestamp, null, TEST_SECRET))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("bodyBytes");
   }
 
   @Test
-  void signWithNullSecretThrows() {
+  void givenNullSecret_whenSigning_thenThrowsIllegalArgumentException() {
     assertThatThrownBy(() -> signer.sign(deliveryId, timestamp, body, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("secretPlaintext");
   }
 
   @Test
-  void signWithBlankSecretThrows() {
+  void givenBlankSecret_whenSigning_thenThrowsIllegalArgumentException() {
     assertThatThrownBy(() -> signer.sign(deliveryId, timestamp, body, "   "))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("secretPlaintext");
   }
 
   @Test
-  void signWithInvalidBase64SecretThrows() {
+  void givenInvalidBase64Secret_whenSigning_thenThrowsIllegalArgumentException() {
     assertThatThrownBy(() -> signer.sign(deliveryId, timestamp, body, "whsec_!!!not-base64!!!"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("base64url");
   }
 
   @Test
-  void signatureFormatIsCorrect() {
+  void givenValidSignature_whenInspected_thenMatchesV1Base64Format() {
     String signature = signer.sign(deliveryId, timestamp, body, TEST_SECRET);
 
     assertThat(signature).matches("^v1,[A-Za-z0-9+/=]+$");
   }
 
   @Test
-  void signatureIsDeterministicAcrossCalls() {
+  void givenSameInputs_whenSigningThreeTimes_thenProducesIdenticalSignatures() {
     String sig1 = signer.sign(deliveryId, timestamp, body, TEST_SECRET);
     String sig2 = signer.sign(deliveryId, timestamp, body, TEST_SECRET);
     String sig3 = signer.sign(deliveryId, timestamp, body, TEST_SECRET);

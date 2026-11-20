@@ -33,13 +33,13 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void generateSecretHasWhsecPrefix() {
+  void givenSigningService_whenGeneratingSecret_thenHasWhsecPrefix() {
     String secret = service.generateSecret();
     assertThat(secret).startsWith("whsec_");
   }
 
   @Test
-  void generateSecretHas256BitsOfEntropy() {
+  void givenSigningService_whenGeneratingSecret_thenHas256BitsOfEntropy() {
     String secret = service.generateSecret();
     String entropyPart = secret.substring("whsec_".length());
     assertThat(entropyPart).hasSize(43);
@@ -48,14 +48,14 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void generateSecretProducesUniqueValues() {
+  void givenSigningService_whenGeneratingTwoSecrets_thenProducesUniqueValues() {
     String secret1 = service.generateSecret();
     String secret2 = service.generateSecret();
     assertThat(secret1).isNotEqualTo(secret2);
   }
 
   @Test
-  void encryptDecryptRoundTrip() {
+  void givenPlaintext_whenEncryptThenDecrypt_thenReturnsOriginalPlaintext() {
     String plaintext = "whsec_test_secret_plaintext_value";
     SigningSecretService.EncryptedSecret encrypted = service.encrypt(plaintext);
 
@@ -69,7 +69,7 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void encryptProducesUniqueNonces() {
+  void givenSamePlaintext_whenEncryptingTwice_thenProducesUniqueNonces() {
     String plaintext = "whsec_same_plaintext_twice";
     SigningSecretService.EncryptedSecret e1 = service.encrypt(plaintext);
     SigningSecretService.EncryptedSecret e2 = service.encrypt(plaintext);
@@ -79,7 +79,7 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void ciphertextTamperingCausesDecryptionFailure() {
+  void givenTamperedCiphertext_whenDecrypting_thenFails() {
     String plaintext = "whsec_tamper_me";
     SigningSecretService.EncryptedSecret encrypted = service.encrypt(plaintext);
 
@@ -92,7 +92,7 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void nonceTamperingCausesDecryptionFailure() {
+  void givenTamperedNonce_whenDecrypting_thenFails() {
     String plaintext = "whsec_tamper_nonce";
     SigningSecretService.EncryptedSecret encrypted = service.encrypt(plaintext);
 
@@ -104,7 +104,7 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void wrongKeyFailsDecryption() throws Exception {
+  void givenWrongKey_whenDecrypting_thenFails() throws Exception {
     String plaintext = "whsec_wrong_key_test";
     SigningSecretService.EncryptedSecret encrypted = service.encrypt(plaintext);
 
@@ -121,7 +121,7 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void unsupportedKeyVersionFails() {
+  void givenUnsupportedKeyVersion_whenDecrypting_thenFails() {
     String plaintext = "whsec_version_test";
     SigningSecretService.EncryptedSecret encrypted = service.encrypt(plaintext);
 
@@ -131,7 +131,8 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void missingEncryptionKeyServiceIsNoOp() throws Exception {
+  void givenMissingEncryptionKey_whenServiceInitialized_thenReportsNotConfigured()
+      throws Exception {
     SigningSecretService service = new AesGcmSigningSecretService("", "v1");
     ((InitializingBean) service).afterPropertiesSet();
     // Service initializes but reports not configured
@@ -146,7 +147,7 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void invalidBase64KeyFailsInitialization() {
+  void givenInvalidBase64Key_whenInitializing_thenFails() {
     SigningSecretService service = new AesGcmSigningSecretService("not-valid-base64!!!", "v1");
     assertThatThrownBy(InitializingBean.class.cast(service)::afterPropertiesSet)
         .isInstanceOf(IllegalStateException.class)
@@ -154,7 +155,7 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void wrongKeySizeFailsInitialization() {
+  void givenWrongKeySize_whenInitializing_thenFails() {
     byte[] shortKey = new byte[16];
     String shortKeyBase64 = Base64.getEncoder().encodeToString(shortKey);
     SigningSecretService service = new AesGcmSigningSecretService(shortKeyBase64, "v1");
@@ -164,25 +165,26 @@ class AesGcmSigningSecretServiceTest {
   }
 
   @Test
-  void encryptRejectsBlankPlaintext() {
+  void givenBlankPlaintext_whenEncrypting_thenThrows() {
     assertThatThrownBy(() -> service.encrypt("")).isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> service.encrypt("   ")).isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
-  void decryptRejectsBlankCiphertext() {
+  void givenBlankCiphertext_whenDecrypting_thenThrows() {
     assertThatThrownBy(() -> service.decrypt("", new byte[12], "v1"))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
-  void decryptRejectsEmptyNonce() {
+  void givenEmptyNonce_whenDecrypting_thenThrows() {
     assertThatThrownBy(() -> service.decrypt("whsec_ciphertext", new byte[0], "v1"))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
-  void decryptsOldKeyVersionDuringEncryptionKeyRotation() throws Exception {
+  void givenOldKeyVersion_whenDecryptingAfterRotation_thenReturnsOriginalPlaintext()
+      throws Exception {
     var old = service.encrypt("whsec_retained");
     String newKey = Base64.getEncoder().encodeToString(new byte[32]);
     var rotated =
