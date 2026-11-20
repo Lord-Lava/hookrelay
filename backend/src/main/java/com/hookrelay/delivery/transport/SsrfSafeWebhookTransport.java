@@ -4,6 +4,7 @@ import com.hookrelay.security.ssrf.SsrfUrlValidator;
 import com.hookrelay.security.ssrf.SsrfValidationException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
@@ -16,6 +17,7 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
@@ -96,18 +98,41 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
       // Defense in depth: validate URL at delivery time too.
       urlValidator.validate(url);
 
+      // Resolve DNS at connection time. Every resolved address must pass the public-address
+      // policy before we connect. This prevents DNS rebinding: we never re-resolve the hostname.
       URI uri = new URI(url);
+      String host = uri.getHost();
+      if (host == null || host.isBlank()) {
+        throw new TransportException("URL host is required");
+      }
       int port = uri.getPort() == -1 ? 443 : uri.getPort();
       String path = uri.getPath() + (uri.getQuery() != null ? "?" + uri.getQuery() : "");
+
+      InetAddress[] addresses;
+      try {
+        addresses = dnsResolver.resolve(host);
+      } catch (UnknownHostException e) {
+        throw new TransportException("Unable to resolve endpoint hostname: " + host, e);
+      }
+      if (addresses == null || addresses.length == 0) {
+        throw new TransportException("No addresses resolved for " + host);
+      }
+      // Validate every DNS answer; a single unsafe address rejects the hostname entirely.
+      for (InetAddress address : addresses) {
+        SsrfAddressValidator.validate(address);
+      }
+
+      // Pin the connection to the first validated address. Pass the InetAddress directly
+      // so HttpClient connects to the IP without re-resolving DNS. Preserve the original
+      // hostname in the "Host" header for TLS SNI/verification.
+      InetAddress selectedAddress = selectAddress(addresses);
+      HttpHost target = new HttpHost(selectedAddress, port);
 
       HttpPost httpPost = new HttpPost(path);
       httpPost.setHeader("Host", uri.getHost());
       httpPost.setEntity(new ByteArrayEntity(body, ContentType.APPLICATION_JSON));
 
-      // HttpClient uses the project's DnsResolver (configured above), which resolves and validates
-      // every address. The connection is therefore pinned to a validated address, preventing DNS
-      // rebinding and mixed-answer attacks.
-      try (CloseableHttpResponse response = httpClient.execute(httpPost)) {
+      try (CloseableHttpResponse response = httpClient.execute(target, httpPost)) {
         int statusCode = response.getCode();
         String responseBody = readBounded(response.getEntity(), properties.maxResponseBodyBytes());
         return new TransportResult(statusCode, responseBody, Instant.now());
@@ -141,6 +166,16 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
       throw new TransportException("URL host is required");
     }
     return host;
+  }
+
+  private static InetAddress selectAddress(InetAddress[] addresses) {
+    // Prefer IPv4 over IPv6 for compatibility; fall back to the first address.
+    for (InetAddress address : addresses) {
+      if (address instanceof java.net.Inet4Address) {
+        return address;
+      }
+    }
+    return addresses[0];
   }
 
   private String readBounded(HttpEntity entity, int maxBytes) throws TransportException {
