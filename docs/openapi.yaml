@@ -127,7 +127,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
-        '409': { description: Endpoint URL already exists for this project or the project has reached its 1000 nondeleted endpoint limit }
+        '409': { description: Endpoint URL already exists for this project, or the project has reached its 1000 nondeleted endpoint limit }
         '429':
           $ref: '#/components/responses/RateLimited'
         '503': { description: Signing service is not configured }
