@@ -5,6 +5,7 @@ import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -23,6 +24,18 @@ public class HmacSha256WebhookSigner implements WebhookSigner {
   private static final String SIGNATURE_PREFIX = "v1,";
   private static final String HMAC_ALGORITHM = "HmacSHA256";
   private static final String SECRET_PREFIX = "whsec_";
+  private static final byte[] DOT = ".".getBytes(StandardCharsets.UTF_8);
+  private static final int KEY_SIZE_BYTES = 32;
+
+  private final ConcurrentHashMap<String, SecretKeySpec> keyCache = new ConcurrentHashMap<>();
+  private final ThreadLocal<Mac> macThreadLocal =
+      ThreadLocal.withInitial(() -> {
+        try {
+          return Mac.getInstance(HMAC_ALGORITHM);
+        } catch (NoSuchAlgorithmException e) {
+          throw new ExceptionInInitializerError(e);
+        }
+      });
 
   @Override
   public String sign(
@@ -37,35 +50,43 @@ public class HmacSha256WebhookSigner implements WebhookSigner {
       throw new IllegalArgumentException("secretPlaintext must not be blank");
     }
 
-    // Strip the whsec_ prefix if present to get the raw base64url-encoded key
+    SecretKeySpec cachedKey = keyCache.computeIfAbsent(secretPlaintext, this::decodeKey);
+
+    Mac mac = macThreadLocal.get();
+    mac.reset();
+    try {
+      mac.init(cachedKey);
+    } catch (InvalidKeyException e) {
+      throw new IllegalStateException("Failed to initialize HMAC-SHA256", e);
+    }
+
+    byte[] deliveryIdBytes = deliveryId.toString().getBytes(StandardCharsets.UTF_8);
+    byte[] timestampBytes = Long.toString(timestampSeconds).getBytes(StandardCharsets.UTF_8);
+
+    mac.update(deliveryIdBytes);
+    mac.update(DOT);
+    mac.update(timestampBytes);
+    mac.update(DOT);
+    mac.update(bodyBytes);
+    byte[] signature = mac.doFinal();
+
+    return SIGNATURE_PREFIX + Base64.getEncoder().encodeToString(signature);
+  }
+
+  private SecretKeySpec decodeKey(String secretPlaintext) {
     String keyMaterial = secretPlaintext;
     if (keyMaterial.startsWith(SECRET_PREFIX)) {
       keyMaterial = keyMaterial.substring(SECRET_PREFIX.length());
     }
-
     byte[] key;
     try {
       key = Base64.getUrlDecoder().decode(keyMaterial);
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException("Signing secret must be base64url-encoded", e);
     }
-
-    Mac mac;
-    try {
-      mac = Mac.getInstance(HMAC_ALGORITHM);
-      mac.init(new SecretKeySpec(key, HMAC_ALGORITHM));
-    } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-      throw new IllegalStateException("Failed to initialize HMAC-SHA256", e);
+    if (key.length != KEY_SIZE_BYTES) {
+      throw new IllegalArgumentException("Signing key must decode to exactly 32 bytes");
     }
-
-    String message =
-        deliveryId.toString()
-            + "."
-            + timestampSeconds
-            + "."
-            + new String(bodyBytes, StandardCharsets.UTF_8);
-    byte[] signature = mac.doFinal(message.getBytes(StandardCharsets.UTF_8));
-
-    return SIGNATURE_PREFIX + Base64.getEncoder().encodeToString(signature);
+    return new SecretKeySpec(key, HMAC_ALGORITHM);
   }
 }
