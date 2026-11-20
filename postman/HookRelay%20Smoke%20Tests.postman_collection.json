@@ -92,6 +92,124 @@
       ]
     },
     {
+      "name": "Create endpoint beyond capacity returns 409",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Api-Key",
+            "value": "{{api_key}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/v1/endpoints",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"url\": \"https://8.8.8.8/cap-initial\",\n  \"description\": \"Capacity test initial\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "var createdIds = [];",
+              "var maxAttempts = 1050;",
+              "var attempt = 0;",
+              "",
+              "function createNext() {",
+              "  attempt++;",
+              "  if (attempt > maxAttempts) {",
+              "    pm.test('Capacity limit reached within ' + maxAttempts + ' attempts', function () {",
+              "      pm.expect(false).to.be.true;",
+              "    });",
+              "    return cleanup();",
+              "  }",
+              "",
+              "  var request = {",
+              "    url: pm.variables.get('base_url') + '/v1/endpoints',",
+              "    method: 'POST',",
+              "    header: [",
+              "      { key: 'X-Api-Key', value: '{{api_key}}' },",
+              "      { key: 'Content-Type', value: 'application/json' }",
+              "    ],",
+              "    body: {",
+              "      mode: 'raw',",
+              "      raw: JSON.stringify({",
+              "        url: 'https://8.8.8.8/cap-' + pm.variables.get('runId') + '-' + attempt,",
+              "        description: 'Capacity test ' + attempt",
+              "      }),",
+              "      options: { raw: { language: 'json' } }",
+              "    }",
+              "  };",
+              "",
+              "  pm.sendRequest(request, function (err, res) {",
+              "    if (err) {",
+              "      console.log('Request error:', err);",
+              "      createNext();",
+              "      return;",
+              "    }",
+              "",
+              "    if (res.code === 201) {",
+              "      try {",
+              "        var body = res.json();",
+              "        if (body && body.id) createdIds.push(body.id);",
+              "      } catch (e) {}",
+              "      createNext();",
+              "    } else if (res.code === 409) {",
+              "      var detail = '';",
+              "      try { detail = res.json().detail || ''; } catch (e) {}",
+              "      pm.test('Capacity limit enforced with 409', function () {",
+              "        pm.expect(res.code).to.equal(409);",
+              "        pm.expect(detail).to.include('1000');",
+              "      });",
+              "      cleanup();",
+              "    } else {",
+              "      pm.test('Unexpected response during capacity test', function () {",
+              "        pm.expect(res.code).to.be.oneOf([201, 409]);",
+              "      });",
+              "      createNext();",
+              "    }",
+              "  });",
+              "}",
+              "",
+              "function cleanup() {",
+              "  var i = 0;",
+              "  function deleteNext() {",
+              "    if (i >= createdIds.length) {",
+              "      pm.test('Created ' + createdIds.length + ' endpoints before capacity limit', function () {",
+              "        pm.expect(createdIds.length).to.be.above(900);",
+              "      });",
+              "      return;",
+              "    }",
+              "    pm.sendRequest({",
+              "      url: pm.variables.get('base_url') + '/v1/endpoints/' + createdIds[i],",
+              "      method: 'DELETE',",
+              "      header: [ { key: 'X-Api-Key', value: '{{api_key}}' } ]",
+              "    }, function () {",
+              "      i++;",
+              "      deleteNext();",
+              "    });",
+              "  }",
+              "  deleteNext();",
+              "}",
+              "",
+              "createNext();"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "Create foreign endpoint with second project key",
       "request": {
         "method": "POST",
