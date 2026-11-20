@@ -9,6 +9,7 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Map;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
@@ -94,6 +95,20 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
 
   @Override
   public TransportResult send(String url, byte[] body) throws TransportException {
+    return send(url, body, Map.of());
+  }
+
+  /**
+   * Sends an HTTP POST request with additional headers.
+   *
+   * @param url the destination URL (HTTPS only, port 443)
+   * @param body the request body bytes
+   * @param headers additional HTTP headers to include in the request
+   * @return the transport result with status code and bounded body preview
+   * @throws TransportException if the request cannot be sent safely or fails
+   */
+  public TransportResult send(String url, byte[] body, Map<String, String> headers)
+      throws TransportException {
     try {
       // Defense in depth: validate URL at delivery time too.
       urlValidator.validate(url);
@@ -131,6 +146,9 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
       HttpPost httpPost = new HttpPost(path);
       httpPost.setHeader("Host", uri.getHost());
       httpPost.setEntity(new ByteArrayEntity(body, ContentType.APPLICATION_JSON));
+      if (headers != null) {
+        headers.forEach(httpPost::setHeader);
+      }
 
       try (CloseableHttpResponse response = httpClient.execute(target, httpPost)) {
         int statusCode = response.getCode();
