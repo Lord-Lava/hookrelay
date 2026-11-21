@@ -137,7 +137,7 @@ Rules:
 - Remove unused imports and avoid wildcard imports in production source.
 - Use import statements for classes from other packages; do not use fully-qualified class names in method signatures, field declarations, variable declarations, catch clauses, `instanceof` checks, or annotations. Import the class and use its simple name. Use fully-qualified names only when necessary to resolve ambiguity between same-named classes from different packages.
 - Prefer standard Java APIs over third-party utilities for simple operations.
-- Use Lombok where possible to reduce boilerplate (`@Value`, `@Builder`, `@Slf4j`, etc.). Prefer `record` for immutable data carriers; add Lombok only where `record` cannot be used (e.g., serialization framework constraints). For data carriers with Lombok, prefer `@Builder` with `@Value`/`@Data` over plain constructors; avoid telescoping constructors. Keep generated behavior explicit and debuggable.
+- Prefer `record` for immutable data carriers; add Lombok only where `record` cannot be used (e.g., serialization framework constraints). For data carriers with Lombok, prefer `@Builder` with `@Value`/`@Data` over plain constructors; avoid telescoping constructors. Keep generated behavior explicit and debuggable.
 - Do not suppress compiler warnings globally. Fix the cause or narrowly suppress a documented unavoidable warning.
 
 ### 3.5 Import review before completion
