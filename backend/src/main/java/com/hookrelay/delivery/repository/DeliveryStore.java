@@ -1,5 +1,6 @@
 package com.hookrelay.delivery.repository;
 
+import com.hookrelay.delivery.application.RetryScheduler;
 import com.hookrelay.delivery.domain.AttemptOutcome;
 import com.hookrelay.delivery.domain.Delivery;
 import com.hookrelay.delivery.domain.DeliveryAttempt;
@@ -26,10 +27,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class DeliveryStore {
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
+  private final RetryScheduler retryScheduler;
 
-  public DeliveryStore(JdbcTemplate jdbc, TransactionTemplate transactions) {
+  public DeliveryStore(
+      JdbcTemplate jdbc, TransactionTemplate transactions, RetryScheduler retryScheduler) {
     this.jdbc = jdbc;
     this.transactions = transactions;
+    this.retryScheduler = retryScheduler;
   }
 
   public Optional<Delivery> find(UUID projectId, UUID id) {
@@ -292,7 +296,7 @@ public class DeliveryStore {
   /**
    * Expires only the exact old claim. Recovery scheduling/classification is supplied by later code.
    */
-  public boolean recoverExpired(UUID projectId, UUID id, UUID token, Instant retryAt) {
+  public boolean recoverExpired(UUID projectId, UUID id, UUID token) {
     return transactions.execute(tx -> {
       var locked = lock(projectId, id);
       if (locked.isEmpty()) return false;
@@ -311,6 +315,7 @@ public class DeliveryStore {
           projectId,
           id,
           token);
+      Instant retryAt = retryScheduler.nextAttemptAt(d.cycleAttemptCount() + 1, null, now);
       DeliveryStatus target = retryTarget(d, retryAt, now);
       transition(
           d,

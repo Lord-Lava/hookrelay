@@ -103,8 +103,7 @@ public class DeliveryDispatcher {
       }
 
       try {
-        deliveryStore.recoverExpired(
-            delivery.projectId(), delivery.id(), delivery.leaseToken(), Instant.now());
+        deliveryStore.recoverExpired(delivery.projectId(), delivery.id(), delivery.leaseToken());
         dispatchControl.release(delivery.projectId(), delivery.endpointId());
       } catch (Exception e) {
         log.warn("Lease recovery for delivery {} failed: {}", delivery.id(), e.getMessage(), e);

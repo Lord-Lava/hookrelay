@@ -3,6 +3,7 @@ package com.hookrelay.delivery.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.hookrelay.delivery.application.RetryScheduler;
 import com.hookrelay.delivery.domain.AttemptOutcome;
 import com.hookrelay.delivery.domain.Delivery;
 import com.hookrelay.delivery.domain.DeliveryPolicy;
@@ -44,6 +45,7 @@ class DeliveryStoreIntegrationTest {
   private TransactionTemplate tx;
   private FanoutStore fanouts;
   private DeliveryStore deliveries;
+  private final RetryScheduler retryScheduler = new RetryScheduler(10, 3600, Duration.ofHours(24));
   private String schema;
   private UUID project;
   private UUID foreignProject;
@@ -69,7 +71,7 @@ class DeliveryStoreIntegrationTest {
     migrate("11");
     tx = new TransactionTemplate(new DataSourceTransactionManager(source));
     fanouts = new FanoutStore(jdbc, tx);
-    deliveries = new DeliveryStore(jdbc, tx);
+    deliveries = new DeliveryStore(jdbc, tx, retryScheduler);
     UUID org = UUID.randomUUID();
     project = UUID.randomUUID();
     foreignProject = UUID.randomUUID();
@@ -211,7 +213,7 @@ class DeliveryStoreIntegrationTest {
                 null,
                 null))
         .isFalse();
-    assertThat(deliveries.recoverExpired(foreignProject, d.id(), d.leaseToken(), null)).isFalse();
+    assertThat(deliveries.recoverExpired(foreignProject, d.id(), d.leaseToken())).isFalse();
     assertThat(deliveries.cancel(foreignProject, d.id(), "CANCELLED")).isFalse();
     assertThat(deliveries.expireHorizon(foreignProject, d.id())).isFalse();
     assertThat(deliveries.find(project, d.id()).orElseThrow().status())
@@ -312,10 +314,7 @@ class DeliveryStoreIntegrationTest {
                 null,
                 null))
         .isFalse();
-    assertThat(
-            deliveries.recoverExpired(
-                project, d.id(), d.leaseToken(), Instant.now().plusSeconds(30)))
-        .isTrue();
+    assertThat(deliveries.recoverExpired(project, d.id(), d.leaseToken())).isTrue();
     assertThat(deliveries.attempts(project, d.id(), 100, 0).getFirst().outcome())
         .isEqualTo(AttemptOutcome.UNKNOWN);
     jdbc.update(
@@ -477,11 +476,8 @@ class DeliveryStoreIntegrationTest {
         "UPDATE deliveries SET lease_expires_at=clock_timestamp()-interval '1 second' WHERE project_id=? AND id=?",
         project,
         d.id());
-    assertThat(
-            deliveries.recoverExpired(
-                project, d.id(), d.leaseToken(), Instant.now().plusSeconds(30)))
-        .isTrue();
-    assertThat(deliveries.recoverExpired(project, d.id(), d.leaseToken(), null)).isFalse();
+    assertThat(deliveries.recoverExpired(project, d.id(), d.leaseToken())).isTrue();
+    assertThat(deliveries.recoverExpired(project, d.id(), d.leaseToken())).isFalse();
     assertThat(deliveries.find(project, d.id()).orElseThrow().attemptCount()).isZero();
     assertThat(deliveries.attempts(project, d.id(), 100, 0)).isEmpty();
   }

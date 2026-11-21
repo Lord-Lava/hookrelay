@@ -8,14 +8,13 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
+@Slf4j
 public class ApiKeyAuthService {
-  private static final Logger log = LoggerFactory.getLogger(ApiKeyAuthService.class);
   private static final Pattern KEY_PATTERN =
       Pattern.compile("^hr_live_([A-Za-z0-9]{4,16})_([A-Za-z0-9_-]{16,200})$");
 
