@@ -61,18 +61,19 @@ public class EndpointService {
     SigningSecretService.EncryptedSecret encrypted = signingSecretService.encrypt(plaintextSecret);
 
     WebhookEndpoint endpoint =
-        new WebhookEndpoint(
-            null,
-            projectId,
-            url,
-            description,
-            encrypted.ciphertext(),
-            encrypted.nonce(),
-            encrypted.keyVersion(),
-            true,
-            null,
-            null,
-            null);
+        WebhookEndpoint.builder()
+            .id(null)
+            .projectId(projectId)
+            .url(url)
+            .description(description)
+            .signingSecretCiphertext(encrypted.ciphertext())
+            .nonce(encrypted.nonce())
+            .keyVersion(encrypted.keyVersion())
+            .enabled(true)
+            .createdAt(null)
+            .updatedAt(null)
+            .deletedAt(null)
+            .build();
     requireNoNullBytes(description);
     try {
       WebhookEndpoint saved = endpointRepository.save(endpoint);
@@ -118,18 +119,19 @@ public class EndpointService {
     String resolvedDescription = description != null ? description : existing.description();
     requireNoNullBytes(resolvedDescription);
     WebhookEndpoint updated =
-        new WebhookEndpoint(
-            existing.id(),
-            existing.projectId(),
-            resolvedUrl,
-            resolvedDescription,
-            existing.signingSecretCiphertext(),
-            existing.nonce(),
-            existing.keyVersion(),
-            enabled != null ? enabled : existing.enabled(),
-            existing.createdAt(),
-            null,
-            existing.deletedAt());
+        WebhookEndpoint.builder()
+            .id(existing.id())
+            .projectId(existing.projectId())
+            .url(resolvedUrl)
+            .description(resolvedDescription)
+            .signingSecretCiphertext(existing.signingSecretCiphertext())
+            .nonce(existing.nonce())
+            .keyVersion(existing.keyVersion())
+            .enabled(enabled != null ? enabled : existing.enabled())
+            .createdAt(existing.createdAt())
+            .updatedAt(null)
+            .deletedAt(existing.deletedAt())
+            .build();
     try {
       return endpointRepository.save(updated);
     } catch (DataIntegrityViolationException exception) {
@@ -152,18 +154,19 @@ public class EndpointService {
       return;
     }
     WebhookEndpoint updated =
-        new WebhookEndpoint(
-            existing.id(),
-            existing.projectId(),
-            existing.url(),
-            existing.description(),
-            existing.signingSecretCiphertext(),
-            existing.nonce(),
-            existing.keyVersion(),
-            true,
-            existing.createdAt(),
-            null,
-            existing.deletedAt());
+        WebhookEndpoint.builder()
+            .id(existing.id())
+            .projectId(existing.projectId())
+            .url(existing.url())
+            .description(existing.description())
+            .signingSecretCiphertext(existing.signingSecretCiphertext())
+            .nonce(existing.nonce())
+            .keyVersion(existing.keyVersion())
+            .enabled(true)
+            .createdAt(existing.createdAt())
+            .updatedAt(null)
+            .deletedAt(existing.deletedAt())
+            .build();
     endpointRepository.save(updated);
   }
 
@@ -174,18 +177,19 @@ public class EndpointService {
       return;
     }
     WebhookEndpoint updated =
-        new WebhookEndpoint(
-            existing.id(),
-            existing.projectId(),
-            existing.url(),
-            existing.description(),
-            existing.signingSecretCiphertext(),
-            existing.nonce(),
-            existing.keyVersion(),
-            false,
-            existing.createdAt(),
-            null,
-            existing.deletedAt());
+        WebhookEndpoint.builder()
+            .id(existing.id())
+            .projectId(existing.projectId())
+            .url(existing.url())
+            .description(existing.description())
+            .signingSecretCiphertext(existing.signingSecretCiphertext())
+            .nonce(existing.nonce())
+            .keyVersion(existing.keyVersion())
+            .enabled(false)
+            .createdAt(existing.createdAt())
+            .updatedAt(null)
+            .deletedAt(existing.deletedAt())
+            .build();
     endpointRepository.save(updated);
   }
 

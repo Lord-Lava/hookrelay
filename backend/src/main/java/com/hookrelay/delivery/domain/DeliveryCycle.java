@@ -2,7 +2,9 @@ package com.hookrelay.delivery.domain;
 
 import java.time.Instant;
 import java.util.UUID;
+import lombok.Builder;
 
+@Builder
 public record DeliveryCycle(
     UUID deliveryId,
     int number,

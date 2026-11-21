@@ -55,6 +55,15 @@ dependencies {
 // 4.1.x patch; amqp-client 5.37.1 is a newer candidate for the next review.
 implementation("com.rabbitmq:amqp-client:${libs.versions.rabbitmqAmqpClient.get()}")
 
+// Lombok for generated boilerplate (@Slf4j, @Builder on records). Lombok is not managed by the
+// Spring Boot BOM, so it is pinned explicitly via the version catalog. compileOnly keeps it out
+// of runtime; annotationProcessor enables source generation at compile time.
+compileOnly("org.projectlombok:lombok:${libs.versions.lombok.get()}")
+annotationProcessor("org.projectlombok:lombok:${libs.versions.lombok.get()}")
+testCompileOnly("org.projectlombok:lombok:${libs.versions.lombok.get()}")
+testAnnotationProcessor("org.projectlombok:lombok:${libs.versions.lombok.get()}")
+
+
 // Apache HttpClient 5 for SSRF-safe outbound webhook delivery (Phase 3 Step 3).
 // Spring Boot 4.1.2 BOM does not manage httpclient5; pinned explicitly.
 // Apache HttpClient 5.6.x is actively maintained, widely used, and supported by

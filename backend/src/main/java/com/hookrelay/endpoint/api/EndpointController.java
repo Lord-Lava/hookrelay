@@ -101,36 +101,39 @@ public class EndpointController {
     return ResponseEntity.ok()
         .header("Cache-Control", "no-store")
         .body(
-            new RotateSecretResponse(
-                endpoint.id(),
-                endpoint.projectId(),
-                endpoint.url(),
-                result.signingSecret(),
-                endpoint.enabled(),
-                endpoint.updatedAt()));
+            RotateSecretResponse.builder()
+                .id(endpoint.id())
+                .projectId(endpoint.projectId())
+                .url(endpoint.url())
+                .signingSecret(result.signingSecret())
+                .enabled(endpoint.enabled())
+                .updatedAt(endpoint.updatedAt())
+                .build());
   }
 
   private CreatedEndpointResponse toCreatedResponse(EndpointService.CreatedEndpointResult result) {
     WebhookEndpoint endpoint = result.endpoint();
-    return new CreatedEndpointResponse(
-        endpoint.id(),
-        endpoint.projectId(),
-        endpoint.url(),
-        endpoint.description(),
-        result.signingSecret(),
-        endpoint.enabled(),
-        endpoint.createdAt(),
-        endpoint.updatedAt());
+    return CreatedEndpointResponse.builder()
+        .id(endpoint.id())
+        .projectId(endpoint.projectId())
+        .url(endpoint.url())
+        .description(endpoint.description())
+        .signingSecret(result.signingSecret())
+        .enabled(endpoint.enabled())
+        .createdAt(endpoint.createdAt())
+        .updatedAt(endpoint.updatedAt())
+        .build();
   }
 
   private EndpointResponse toResponse(WebhookEndpoint endpoint) {
-    return new EndpointResponse(
-        endpoint.id(),
-        endpoint.projectId(),
-        endpoint.url(),
-        endpoint.description(),
-        endpoint.enabled(),
-        endpoint.createdAt(),
-        endpoint.updatedAt());
+    return EndpointResponse.builder()
+        .id(endpoint.id())
+        .projectId(endpoint.projectId())
+        .url(endpoint.url())
+        .description(endpoint.description())
+        .enabled(endpoint.enabled())
+        .createdAt(endpoint.createdAt())
+        .updatedAt(endpoint.updatedAt())
+        .build();
   }
 }

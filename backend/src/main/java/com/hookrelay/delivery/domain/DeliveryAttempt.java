@@ -2,7 +2,9 @@ package com.hookrelay.delivery.domain;
 
 import java.time.Instant;
 import java.util.UUID;
+import lombok.Builder;
 
+@Builder
 public record DeliveryAttempt(
     UUID id,
     UUID projectId,

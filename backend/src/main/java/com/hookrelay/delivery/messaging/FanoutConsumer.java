@@ -16,8 +16,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.core.Message;
@@ -35,10 +34,10 @@ import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.TransactionTimedOutException;
 
+@Slf4j
 @Component
 @ConditionalOnProperty(prefix = "hookrelay.fanout", name = "enabled", havingValue = "true")
 public final class FanoutConsumer implements ChannelAwareMessageListener, SmartLifecycle {
-  private static final Logger log = LoggerFactory.getLogger(FanoutConsumer.class);
   private final EventNotificationParser parser;
   private final EventFanoutService service;
   private final MeterRegistry metrics;

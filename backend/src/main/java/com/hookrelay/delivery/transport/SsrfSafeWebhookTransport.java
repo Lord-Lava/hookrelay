@@ -7,24 +7,34 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.Socket;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLSocket;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
+import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
+import org.apache.hc.client5.http.ssl.TlsSocketStrategy;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
+import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.DisposableBean;
@@ -48,6 +58,8 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
   private final SsrfUrlValidator urlValidator;
   private final DnsResolver dnsResolver;
   private final WebhookTransportProperties properties;
+
+  private static final String ORIGINAL_HOSTNAME_ATTR = "hookrelay.ssl.originalHostname";
 
   @Autowired
   public SsrfSafeWebhookTransport(
@@ -73,9 +85,44 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
   }
 
   private static CloseableHttpClient buildHttpClient(WebhookTransportProperties properties) {
-    PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager();
-    connectionManager.setMaxTotal(properties.maxConnections());
-    connectionManager.setDefaultMaxPerRoute(properties.maxConnectionsPerRoute());
+    SSLContext sslContext;
+    try {
+      sslContext = SSLContext.getDefault();
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("Default SSLContext unavailable", e);
+    }
+    // Use the JDK's default hostname verifier against the original URL hostname (not the resolved
+    // IP address). Apache HttpClient enforces verification during the TLS handshake via
+    // SSLConnectionSocketFactory.verifyHostname(), throwing SSLPeerUnverifiedException on mismatch.
+    SSLConnectionSocketFactory sslSocketFactory =
+        new SSLConnectionSocketFactory(sslContext, HttpsURLConnection.getDefaultHostnameVerifier());
+    TlsSocketStrategy tlsSocketStrategy =
+        new TlsSocketStrategy() {
+          @Override
+          public SSLSocket upgrade(
+              Socket socket, String hostname, int port, Object attachment, HttpContext context) {
+            try {
+              // Use the original URL hostname (not the resolved IP) as the TLS peer name so SNI and
+              // certificate verification are performed against the expected hostname. The TCP
+              // connection is already pinned to the validated IP address; no additional DNS lookup
+              // occurs.
+              String tlsPeerName = (String) context.getAttribute(ORIGINAL_HOSTNAME_ATTR);
+              if (tlsPeerName == null || tlsPeerName.isBlank()) {
+                tlsPeerName = hostname;
+              }
+              return (SSLSocket)
+                  sslSocketFactory.createLayeredSocket(socket, tlsPeerName, port, context);
+            } catch (IOException e) {
+              throw new IllegalStateException("TLS upgrade failed: " + e.getMessage(), e);
+            }
+          }
+        };
+    PoolingHttpClientConnectionManager connectionManager =
+        PoolingHttpClientConnectionManagerBuilder.create()
+            .setTlsSocketStrategy(tlsSocketStrategy)
+            .setMaxConnTotal(properties.maxConnections())
+            .setMaxConnPerRoute(properties.maxConnectionsPerRoute())
+            .build();
 
     RequestConfig requestConfig =
         RequestConfig.custom()
@@ -169,10 +216,11 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
       }
 
       // Pin the connection to the first validated address. Pass the InetAddress directly
-      // so HttpClient connects to the IP without re-resolving DNS. Preserve the original
-      // hostname in the "Host" header for TLS SNI/verification.
+      // so HttpClient connects to the IP without re-resolving DNS. Establish TLS to the
+      // validated IP while verifying the certificate and hostname against the original
+      // hostname (SNI/verification happen before the Host header is sent).
       InetAddress selectedAddress = selectAddress(addresses);
-      HttpHost target = new HttpHost(selectedAddress, port);
+      HttpHost target = new HttpHost("https", selectedAddress.getHostAddress(), port);
 
       HttpPost httpPost = new HttpPost(path);
       httpPost.setHeader("Host", uri.getHost());
@@ -190,7 +238,10 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
         }
       }
 
-      try (CloseableHttpResponse response = httpClient.execute(target, httpPost)) {
+      HttpClientContext context = HttpClientContext.create();
+      context.setAttribute(ORIGINAL_HOSTNAME_ATTR, uri.getHost());
+
+      try (CloseableHttpResponse response = httpClient.execute(target, httpPost, context)) {
         int statusCode = response.getCode();
         String responseBody = readBounded(response.getEntity(), properties.maxResponseBodyBytes());
         return new TransportResult(statusCode, responseBody, Instant.now());

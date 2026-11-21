@@ -77,17 +77,19 @@ public class DeliveryStore {
         ORDER BY cycle_number LIMIT ? OFFSET ?
         """,
         (rs, row) ->
-            new DeliveryCycle(
-                id,
-                rs.getInt("cycle_number"),
-                instant(rs, "started_at"),
-                instant(rs, "deadline"),
-                rs.getString("policy_version"),
-                rs.getInt("max_attempts"),
-                rs.getString("terminal_status") == null
-                    ? null
-                    : DeliveryStatus.valueOf(rs.getString("terminal_status")),
-                instant(rs, "terminal_at")),
+            DeliveryCycle.builder()
+                .deliveryId(id)
+                .number(rs.getInt("cycle_number"))
+                .startedAt(instant(rs, "started_at"))
+                .deadline(instant(rs, "deadline"))
+                .policyVersion(rs.getString("policy_version"))
+                .maxAttempts(rs.getInt("max_attempts"))
+                .terminalStatus(
+                    rs.getString("terminal_status") == null
+                        ? null
+                        : DeliveryStatus.valueOf(rs.getString("terminal_status")))
+                .terminalAt(instant(rs, "terminal_at"))
+                .build(),
         projectId,
         id,
         limit,
@@ -416,44 +418,46 @@ public class DeliveryStore {
   }
 
   private static Delivery delivery(ResultSet rs) throws SQLException {
-    return new Delivery(
-        rs.getObject("id", UUID.class),
-        rs.getObject("project_id", UUID.class),
-        rs.getObject("event_id", UUID.class),
-        rs.getObject("endpoint_id", UUID.class),
-        rs.getString("destination_url"),
-        DeliveryStatus.valueOf(rs.getString("status")),
-        rs.getInt("attempt_count"),
-        rs.getInt("cycle_number"),
-        rs.getInt("cycle_attempt_count"),
-        instant(rs, "next_attempt_at"),
-        rs.getString("lease_owner"),
-        rs.getObject("lease_token", UUID.class),
-        instant(rs, "lease_expires_at"),
-        instant(rs, "cycle_started_at"),
-        instant(rs, "cycle_deadline"),
-        rs.getString("policy_version"),
-        rs.getInt("max_attempts"),
-        instant(rs, "terminal_at"),
-        rs.getString("last_error_code"),
-        instant(rs, "created_at"),
-        instant(rs, "updated_at"));
+    return Delivery.builder()
+        .id(rs.getObject("id", UUID.class))
+        .projectId(rs.getObject("project_id", UUID.class))
+        .eventId(rs.getObject("event_id", UUID.class))
+        .endpointId(rs.getObject("endpoint_id", UUID.class))
+        .destinationUrl(rs.getString("destination_url"))
+        .status(DeliveryStatus.valueOf(rs.getString("status")))
+        .attemptCount(rs.getInt("attempt_count"))
+        .cycleNumber(rs.getInt("cycle_number"))
+        .cycleAttemptCount(rs.getInt("cycle_attempt_count"))
+        .nextAttemptAt(instant(rs, "next_attempt_at"))
+        .leaseOwner(rs.getString("lease_owner"))
+        .leaseToken(rs.getObject("lease_token", UUID.class))
+        .leaseExpiresAt(instant(rs, "lease_expires_at"))
+        .cycleStartedAt(instant(rs, "cycle_started_at"))
+        .cycleDeadline(instant(rs, "cycle_deadline"))
+        .policyVersion(rs.getString("policy_version"))
+        .maxAttempts(rs.getInt("max_attempts"))
+        .terminalAt(instant(rs, "terminal_at"))
+        .lastErrorCode(rs.getString("last_error_code"))
+        .createdAt(instant(rs, "created_at"))
+        .updatedAt(instant(rs, "updated_at"))
+        .build();
   }
 
   private static DeliveryAttempt attempt(ResultSet rs) throws SQLException {
-    return new DeliveryAttempt(
-        rs.getObject("id", UUID.class),
-        rs.getObject("project_id", UUID.class),
-        rs.getObject("delivery_id", UUID.class),
-        rs.getInt("attempt_number"),
-        rs.getInt("cycle_number"),
-        rs.getObject("lease_token", UUID.class),
-        instant(rs, "started_at"),
-        instant(rs, "completed_at"),
-        AttemptOutcome.valueOf(rs.getString("outcome")),
-        rs.getObject("http_status", Integer.class),
-        rs.getObject("duration_ms", Long.class),
-        rs.getString("error_code"));
+    return DeliveryAttempt.builder()
+        .id(rs.getObject("id", UUID.class))
+        .projectId(rs.getObject("project_id", UUID.class))
+        .deliveryId(rs.getObject("delivery_id", UUID.class))
+        .attemptNumber(rs.getInt("attempt_number"))
+        .cycleNumber(rs.getInt("cycle_number"))
+        .leaseToken(rs.getObject("lease_token", UUID.class))
+        .startedAt(instant(rs, "started_at"))
+        .completedAt(instant(rs, "completed_at"))
+        .outcome(AttemptOutcome.valueOf(rs.getString("outcome")))
+        .httpStatus(rs.getObject("http_status", Integer.class))
+        .durationMs(rs.getObject("duration_ms", Long.class))
+        .errorCode(rs.getString("error_code"))
+        .build();
   }
 
   private record LockedDelivery(Delivery delivery, boolean active) {}

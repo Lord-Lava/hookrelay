@@ -2,7 +2,9 @@ package com.hookrelay.endpoint.domain;
 
 import java.time.Instant;
 import java.util.UUID;
+import lombok.Builder;
 
+@Builder
 public record WebhookEndpoint(
     UUID id,
     UUID projectId,
