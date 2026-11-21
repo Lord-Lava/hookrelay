@@ -21,7 +21,7 @@ The transport validates DNS at connection time and pins connections to validated
 - DNS resolved and validated at **connection time** (not registration time)
 - Every DNS answer checked; mixed public/private answers rejected (defends against DNS rebinding)
 - Connection pinned to first validated IPv4 address (fallback to first address)
-- Original hostname preserved in `Host` header for TLS SNI/hostname verification
+- DNS resolves the hostname to IP addresses at connection time; the connection is pinned to the first validated IP. The original hostname is sent in the HTTP `Host` header. TLS SNI and certificate verification are performed against the connection target during the TLS handshake, before the `Host` header is transmitted — the `Host` header does not control SNI.
 - No redirects (`disableRedirectHandling`)
 - No cookies (`disableCookieManagement`)
 - No automatic retries (`disableAutomaticRetries`)
@@ -40,10 +40,9 @@ Commands run from repository root unless noted.
 |---|---|---|
 | Toolchain | `./backend/gradlew -p backend --no-daemon --version` | Java 25.0.5; Gradle 9.9.1 |
 | Build, tests, SBOM | `./backend/gradlew -p backend --no-daemon clean check bootJar cyclonedxBom` | **Passed**; 234 tests, zero failures/errors/skips |
-| Dependency scan | `./gradlew -p backend dependencyCheckAnalyze --rerun-tasks` | **Passed**; 20 findings against `dependency-management-plugin-1.1.7.jar`, all MEDIUM/LOW (CVSS 2.6–6.8), zero High/Critical (≥7.0). All are false positives: the Gradle build plugin is misidentified as `spring_framework:1.1.7`; none of the CVEs apply to a Gradle plugin. `failBuildOnCVSS = 7.0` correctly allows the build. |
-| Scan without NVD key | `env -u NVD_API_KEY ./gradlew -p backend dependencyCheckAnalyze --rerun-tasks` | **Passed**: same 20 findings; no credential-dependent bypass |
-| Image build | `docker build --progress=plain -t hookrelay-review:local backend` | **Passed** |
-| Image scan | `scripts/scan-containers.sh` | **Passed**: 0 image vulnerabilities, 0 High/Critical, 0 secret findings |
+| Dependency scan | `./backend/gradlew -p backend dependencyCheckAnalyze --rerun-tasks` | **Passed**; 20 findings against `dependency-management-plugin-1.1.7.jar`, all MEDIUM/LOW (CVSS 2.6–6.8), zero High/Critical (≥7.0). All are false positives: the Gradle build plugin is misidentified as `spring_framework:1.1.7`; none of the CVEs apply to a Gradle plugin. `failBuildOnCVSS = 7.0` correctly allows the build. |
+| Scan without NVD key | `env -u NVD_API_KEY ./backend/gradlew -p backend dependencyCheckAnalyze --rerun-tasks` | **Passed**: same 20 findings; no credential-dependent bypass |
+| Image scan | `scripts/scan-containers.sh` | **Passed**: 0 HIGH/CRITICAL image vulnerabilities, 0 secret findings |
 | Secret scan | Included in `scripts/scan-containers.sh` | **Passed**: 0 secret findings |
 
 ### Transport-specific test results (Step 3)

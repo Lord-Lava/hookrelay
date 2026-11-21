@@ -31,7 +31,7 @@ The signing infrastructure implements the Standard Webhooks v1 HMAC-SHA256 wire 
 
 ## Security properties
 - HMAC-SHA256 (not a home-grown algorithm)
-- Constant-time key derivation and signing
+- Key derivation is cached per signing secret; signing uses the JCA `HmacSHA256` implementation.
 - 32-byte key minimum enforced (rejects weak keys)
 - Base64url secret decoding (matches HookRelay's existing `whsec_` secret format)
 - Thread-local `Mac` instances (no shared mutable state)
@@ -48,8 +48,8 @@ Commands run from repository root unless noted.
 |---|---|---|
 | Toolchain | `./backend/gradlew -p backend --no-daemon --version` | Java 25.0.5; Gradle 9.9.1 |
 | Build, tests, SBOM | `./backend/gradlew -p backend --no-daemon clean check bootJar cyclonedxBom` | **Passed**; 234 tests, zero failures/errors/skips |
-| Dependency scan | `./gradlew -p backend dependencyCheckAnalyze --rerun-tasks` | **Passed**; 20 findings against `dependency-management-plugin-1.1.7.jar`, all MEDIUM/LOW, zero High/Critical (≥7.0). All are false positives (plugin misidentified as Spring Framework). |
-| Image scan | `scripts/scan-containers.sh` | **Passed**: 0 image vulnerabilities, 0 High/Critical, 0 secret findings |
+| Dependency scan | `./backend/gradlew -p backend dependencyCheckAnalyze --rerun-tasks` | **Passed**; 20 findings against `dependency-management-plugin-1.1.7.jar`, all MEDIUM/LOW, zero High/Critical (≥7.0). All are false positives (plugin misidentified as Spring Framework). |
+| Image scan | `scripts/scan-containers.sh` | **Passed**: 0 HIGH/CRITICAL image vulnerabilities, 0 secret findings |
 
 ### Step 4 test results
 
