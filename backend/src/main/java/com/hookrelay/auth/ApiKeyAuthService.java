@@ -8,11 +8,14 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ApiKeyAuthService {
+  private static final Logger log = LoggerFactory.getLogger(ApiKeyAuthService.class);
   private static final Pattern KEY_PATTERN =
       Pattern.compile("^hr_live_([A-Za-z0-9]{4,16})_([A-Za-z0-9_-]{16,200})$");
 
@@ -75,7 +78,10 @@ public class ApiKeyAuthService {
             "UPDATE api_keys SET last_used_at = now() WHERE id = ? AND project_id = ? AND revoked_at IS NULL",
             record.id(),
             record.identity().projectId());
-    if (updated == 0) return Optional.empty();
+    if (updated == 0) {
+      log.warn("Failed to update last_used_at for api key {}", record.id());
+      // Continue anyway - the key is valid, we just couldn't update the timestamp
+    }
     return Optional.of(record.identity());
   }
 
