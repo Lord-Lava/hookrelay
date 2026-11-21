@@ -16,6 +16,7 @@ import java.net.UnknownHostException;
 import java.time.Duration;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
 import org.apache.hc.core5.http.ClassicHttpRequest;
 import org.apache.hc.core5.http.HttpHost;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,10 +51,12 @@ class DnsPinningIntegrationTest {
           throw new UnknownHostException("Unable to resolve: " + host);
         };
 
-    when(httpClient.execute(any(HttpHost.class), any(ClassicHttpRequest.class)))
+    when(httpClient.execute(
+            any(HttpHost.class), any(ClassicHttpRequest.class), any(HttpClientContext.class)))
         .thenAnswer(invocation -> {
           HttpHost target = invocation.getArgument(0);
-          assertThat(target.getAddress().getHostAddress()).isEqualTo("8.8.8.8");
+          assertThat(target.getHostName()).isEqualTo("8.8.8.8");
+          assertThat(target.getSchemeName()).isEqualTo("https");
           CloseableHttpResponse response = mock(CloseableHttpResponse.class);
           when(response.getCode()).thenReturn(200);
           when(response.getEntity()).thenReturn(null);

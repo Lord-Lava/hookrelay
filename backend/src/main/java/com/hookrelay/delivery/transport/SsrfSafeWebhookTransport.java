@@ -10,17 +10,26 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLSocket;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpResponse;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
+import org.apache.hc.client5.http.ssl.NoopHostnameVerifier;
+import org.apache.hc.client5.http.ssl.SSLConnectionSocketFactory;
+import org.apache.hc.client5.http.ssl.TlsSocketStrategy;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.HttpHost;
@@ -49,6 +58,8 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
   private final DnsResolver dnsResolver;
   private final WebhookTransportProperties properties;
 
+  private static final String ORIGINAL_HOSTNAME_ATTR = "hookrelay.ssl.originalHostname";
+
   @Autowired
   public SsrfSafeWebhookTransport(
       SsrfUrlValidator urlValidator,
@@ -73,9 +84,31 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
   }
 
   private static CloseableHttpClient buildHttpClient(WebhookTransportProperties properties) {
-    PoolingHttpClientConnectionManager connectionManager = new PoolingHttpClientConnectionManager();
-    connectionManager.setMaxTotal(properties.maxConnections());
-    connectionManager.setDefaultMaxPerRoute(properties.maxConnectionsPerRoute());
+    SSLContext sslContext;
+    try {
+      sslContext = SSLContext.getDefault();
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("Default SSLContext unavailable", e);
+    }
+    SSLConnectionSocketFactory sslSocketFactory =
+        new SSLConnectionSocketFactory(sslContext, NoopHostnameVerifier.INSTANCE);
+    TlsSocketStrategy tlsSocketStrategy =
+        (socket, target, port, attachment, context) -> {
+          SSLSocket sslSocket =
+              (SSLSocket) sslSocketFactory.createLayeredSocket(socket, target, port, context);
+          String originalHostname = (String) context.getAttribute(ORIGINAL_HOSTNAME_ATTR);
+          if (originalHostname != null) {
+            HttpsURLConnection.getDefaultHostnameVerifier()
+                .verify(originalHostname, sslSocket.getSession());
+          }
+          return sslSocket;
+        };
+    PoolingHttpClientConnectionManager connectionManager =
+        PoolingHttpClientConnectionManagerBuilder.create()
+            .setTlsSocketStrategy(tlsSocketStrategy)
+            .setMaxConnTotal(properties.maxConnections())
+            .setMaxConnPerRoute(properties.maxConnectionsPerRoute())
+            .build();
 
     RequestConfig requestConfig =
         RequestConfig.custom()
@@ -169,10 +202,11 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
       }
 
       // Pin the connection to the first validated address. Pass the InetAddress directly
-      // so HttpClient connects to the IP without re-resolving DNS. Preserve the original
-      // hostname in the "Host" header for TLS SNI/verification.
+      // so HttpClient connects to the IP without re-resolving DNS. Establish TLS to the
+      // validated IP while verifying the certificate and hostname against the original
+      // hostname (SNI/verification happen before the Host header is sent).
       InetAddress selectedAddress = selectAddress(addresses);
-      HttpHost target = new HttpHost(selectedAddress, port);
+      HttpHost target = new HttpHost("https", selectedAddress.getHostAddress(), port);
 
       HttpPost httpPost = new HttpPost(path);
       httpPost.setHeader("Host", uri.getHost());
@@ -190,7 +224,10 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
         }
       }
 
-      try (CloseableHttpResponse response = httpClient.execute(target, httpPost)) {
+      HttpClientContext context = HttpClientContext.create();
+      context.setAttribute(ORIGINAL_HOSTNAME_ATTR, uri.getHost());
+
+      try (CloseableHttpResponse response = httpClient.execute(target, httpPost, context)) {
         int statusCode = response.getCode();
         String responseBody = readBounded(response.getEntity(), properties.maxResponseBodyBytes());
         return new TransportResult(statusCode, responseBody, Instant.now());
