@@ -15,8 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -28,11 +27,10 @@ import org.springframework.transaction.support.TransactionTemplate;
  * attempt result. All work is performed within short database transactions; no network I/O is held
  * inside a transaction.
  */
+@Slf4j
 @Service
 @ConditionalOnProperty(name = "hookrelay.delivery.dispatcher.enabled", havingValue = "true")
 public class DeliveryWorker {
-
-  private static final Logger log = LoggerFactory.getLogger(DeliveryWorker.class);
 
   private final DeliveryStore deliveryStore;
   private final FanoutStore fanoutStore;

@@ -12,7 +12,7 @@ class RetrySchedulerTest {
   private final RetryScheduler scheduler = new RetryScheduler(10, 3600, Duration.ofHours(24));
 
   @Test
-  void baseAttemptDelayWithinRange() {
+  void givenAttempt1_whenComputingNextAttempt_thenDelayIsWithinBaseRange() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     Instant next = scheduler.nextAttemptAt(1, null, now);
     long delaySeconds = next.getEpochSecond() - now.getEpochSecond();
@@ -21,7 +21,7 @@ class RetrySchedulerTest {
   }
 
   @Test
-  void backoffGrowsWithAttemptNumber() {
+  void givenIncreasingAttemptNumber_whenComputingBackoff_thenDelayIncreases() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     Instant first = scheduler.nextAttemptAt(1, null, now);
     Instant second = scheduler.nextAttemptAt(2, null, now);
@@ -34,7 +34,7 @@ class RetrySchedulerTest {
   }
 
   @Test
-  void backoffCappedAtMaxSeconds() {
+  void givenHighAttemptNumber_whenComputingBackoff_thenDelayIsCappedAtMax() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     Instant highAttempt = scheduler.nextAttemptAt(100, null, now);
     long delaySeconds = highAttempt.getEpochSecond() - now.getEpochSecond();
@@ -43,7 +43,7 @@ class RetrySchedulerTest {
   }
 
   @Test
-  void retryAfterHonoredWithinCap() {
+  void givenRetryAfterHint_whenComputingNextAttempt_thenDelayHonorsHintWithinCap() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     Instant withRetryAfter = scheduler.nextAttemptAt(1, 300, now);
     long delaySeconds = withRetryAfter.getEpochSecond() - now.getEpochSecond();
@@ -52,7 +52,7 @@ class RetrySchedulerTest {
   }
 
   @Test
-  void retryAfterClampedToMax() {
+  void givenRetryAfterAboveMax_whenComputingNextAttempt_thenDelayIsCappedAtMax() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     Instant withRetryAfter = scheduler.nextAttemptAt(1, 86400, now);
     long delaySeconds = withRetryAfter.getEpochSecond() - now.getEpochSecond();
@@ -60,7 +60,7 @@ class RetrySchedulerTest {
   }
 
   @Test
-  void beyondCycleDeadlineReturnsNull() {
+  void givenShortCycleDeadline_whenComputingNextAttempt_thenReturnsNull() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     RetryScheduler shortScheduler = new RetryScheduler(10, 3600, Duration.ofSeconds(4));
     Instant result = shortScheduler.nextAttemptAt(1, null, now);
@@ -68,7 +68,7 @@ class RetrySchedulerTest {
   }
 
   @Test
-  void invalidAttemptNumberThrows() {
+  void givenInvalidAttemptNumber_whenComputingNextAttempt_thenThrows() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
     assertThatThrownBy(() -> scheduler.nextAttemptAt(0, null, now))
         .isInstanceOf(IllegalArgumentException.class);
@@ -77,7 +77,7 @@ class RetrySchedulerTest {
   }
 
   @Test
-  void invalidConfigurationThrows() {
+  void givenInvalidConfiguration_whenConstructing_thenThrows() {
     assertThatThrownBy(() -> new RetryScheduler(0, 3600, Duration.ofHours(24)))
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> new RetryScheduler(10, 5, Duration.ofHours(24)))

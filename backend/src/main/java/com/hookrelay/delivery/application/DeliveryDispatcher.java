@@ -4,24 +4,15 @@ import com.hookrelay.delivery.domain.Delivery;
 import com.hookrelay.delivery.repository.DeliveryStore;
 import java.time.Instant;
 import java.util.List;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/**
- * Polls PostgreSQL for due deliveries and dispatches them to workers.
- *
- * <p>Claims deliveries using {@code FOR UPDATE SKIP LOCKED} to avoid concurrent claim conflicts.
- * Respects per-project and per-endpoint concurrency and rate limits via {@link
- * DispatchControlService}. Processing is delegated to {@link DeliveryWorker}.
- */
+@Slf4j
 @Component
 @ConditionalOnProperty(name = "hookrelay.delivery.dispatcher.enabled", havingValue = "true")
 public class DeliveryDispatcher {
-
-  private static final Logger log = LoggerFactory.getLogger(DeliveryDispatcher.class);
 
   private final DeliveryStore deliveryStore;
   private final DeliveryWorker deliveryWorker;

@@ -17,7 +17,7 @@ class DispatchControlServiceTest {
   private final UUID endpointB1 = UUID.randomUUID();
 
   @Test
-  void acquireAndReleaseProjectConcurrency() {
+  void givenCapacityLimit_whenAcquiringConcurrently_thenRejectsExcessAcquisitions() {
     assertThat(control.tryAcquire(projectA, endpointA1, 2, 1, 1000, 1000)).isTrue();
     assertThat(control.tryAcquire(projectA, endpointA2, 2, 1, 1000, 1000)).isTrue();
     assertThat(control.tryAcquire(projectA, endpointA1, 2, 1, 1000, 1000))
@@ -33,7 +33,7 @@ class DispatchControlServiceTest {
   }
 
   @Test
-  void endpointConcurrencyLimitIndependentOfProject() {
+  void givenEndpointLimit_whenAcquiringConcurrently_thenRejectsExcessAcquisitions() {
     assertThat(control.tryAcquire(projectA, endpointA1, 100, 1, 1000, 1000)).isTrue();
     assertThat(control.tryAcquire(projectA, endpointA1, 100, 1, 1000, 1000))
         .isFalse(); // endpoint at limit
@@ -46,10 +46,9 @@ class DispatchControlServiceTest {
   }
 
   @Test
-  void rateLimitPerProject() {
+  void givenRateLimit_whenAcquiringRapidly_thenRejectsExcessAcquisitions() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
-    // We can't easily test rate limiting without mocking Instant, but we can verify
-    // that rapid acquisitions within the same project work up to the rate limit
+    // Rapid acquisitions within same project work up to rate limit
     for (int i = 0; i < 20; i++) {
       assertThat(control.tryAcquire(projectA, endpointA1, 100, 100, 20, 100)).isTrue();
     }
@@ -58,7 +57,7 @@ class DispatchControlServiceTest {
   }
 
   @Test
-  void releaseDecrementsCounters() {
+  void givenAcquiredCapacity_whenReleased_thenDecrementsCounters() {
     assertThat(control.tryAcquire(projectA, endpointA1, 5, 5, 1000, 1000)).isTrue();
     assertThat(control.projectActiveClaims(projectA)).isEqualTo(1);
     assertThat(control.endpointActiveClaims(endpointA1)).isEqualTo(1);
@@ -69,7 +68,7 @@ class DispatchControlServiceTest {
   }
 
   @Test
-  void releaseBelowZeroDoesNotGoNegative() {
+  void givenReleaseWithoutAcquire_whenReleasing_thenDoesNotGoNegative() {
     control.release(projectA, endpointA1); // release without acquire
     assertThat(control.projectActiveClaims(projectA)).isEqualTo(0);
     assertThat(control.endpointActiveClaims(endpointA1)).isEqualTo(0);
