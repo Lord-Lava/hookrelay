@@ -1,6 +1,7 @@
 package com.hookrelay.delivery.application;
 
 import com.hookrelay.delivery.domain.Delivery;
+import com.hookrelay.delivery.domain.DeliveryStatus;
 import com.hookrelay.delivery.repository.DeliveryStore;
 import java.time.Instant;
 import java.util.List;
@@ -93,6 +94,42 @@ public class DeliveryDispatcher {
         dispatchControl.release(delivery.projectId(), delivery.endpointId());
       } catch (Exception e) {
         log.warn("Lease recovery for delivery {} failed: {}", delivery.id(), e.getMessage(), e);
+        dispatchControl.release(delivery.projectId(), delivery.endpointId());
+      }
+    }
+  }
+
+  /** Expires queued deliveries whose cycle deadline has passed. */
+  @Scheduled(fixedDelayString = "${hookrelay.delivery.dispatcher.recovery-interval:5s}")
+  public void expireHorizon() {
+    if (!properties.enabled()) {
+      return;
+    }
+
+    Instant now = Instant.now();
+    List<Delivery> expired = deliveryStore.listExpiredLeases(now, properties.maxConcurrentClaims());
+
+    for (Delivery delivery : expired) {
+      if (delivery.status() != DeliveryStatus.PENDING
+          && delivery.status() != DeliveryStatus.RETRY_SCHEDULED) {
+        continue;
+      }
+
+      if (!dispatchControl.tryAcquire(
+          delivery.projectId(),
+          delivery.endpointId(),
+          properties.maxConcurrentPerProject(),
+          properties.maxConcurrentPerEndpoint(),
+          properties.ratePerProjectPerSecond(),
+          properties.ratePerEndpointPerSecond())) {
+        continue;
+      }
+
+      try {
+        deliveryStore.expireHorizon(delivery.projectId(), delivery.id());
+        dispatchControl.release(delivery.projectId(), delivery.endpointId());
+      } catch (Exception e) {
+        log.warn("Expiration for delivery {} failed: {}", delivery.id(), e.getMessage(), e);
         dispatchControl.release(delivery.projectId(), delivery.endpointId());
       }
     }

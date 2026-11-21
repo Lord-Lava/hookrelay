@@ -54,7 +54,9 @@ public class RetryScheduler {
       throw new IllegalArgumentException("Now must not be null");
     }
 
-    long capSeconds = Math.min(maxSeconds, (long) baseSeconds * (1L << (attemptNumber - 1)));
+    long backoffSeconds =
+        attemptNumber - 1 >= 63 ? Long.MAX_VALUE : (long) baseSeconds * (1L << (attemptNumber - 1));
+    long capSeconds = Math.min(maxSeconds, backoffSeconds);
     long jitteredSeconds = random.nextLong(capSeconds / 2, capSeconds + 1);
 
     long delaySeconds = jitteredSeconds;

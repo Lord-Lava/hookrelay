@@ -84,7 +84,7 @@ public class ApiKeyAuthService {
             record.identity().projectId());
     if (updated == 0) {
       log.warn("Failed to update last_used_at for api key {}", record.id());
-      // Continue anyway - the key is valid, we just couldn't update the timestamp
+      return Optional.empty();
     }
     return Optional.of(record.identity());
   }

@@ -7,7 +7,6 @@ import com.hookrelay.delivery.domain.FanoutSnapshot;
 import com.hookrelay.delivery.repository.DeliveryStore;
 import com.hookrelay.delivery.repository.FanoutStore;
 import com.hookrelay.delivery.signing.WebhookSigner;
-import com.hookrelay.delivery.transport.TransportException;
 import com.hookrelay.delivery.transport.TransportResult;
 import com.hookrelay.delivery.transport.WebhookTransport;
 import com.hookrelay.endpoint.application.EndpointService;
@@ -68,6 +67,25 @@ public class DeliveryWorker {
    * never inside a database transaction.
    */
   public DeliveryStatus process(UUID projectId, UUID deliveryId, UUID leaseToken) {
+    // Preflight: load delivery, fanout snapshot, and signing secret before starting attempt.
+    // This ensures unavailable preparation does not consume an attempt.
+    Delivery delivery = deliveryStore.find(projectId, deliveryId).orElseThrow();
+    FanoutSnapshot snapshot =
+        fanoutStore.find(delivery.projectId(), delivery.eventId()).orElseThrow();
+    byte[] bodyBytes = snapshot.body();
+
+    String secretPlaintext =
+        endpointService.getSigningSecret(delivery.endpointId(), delivery.projectId());
+    Instant now = Instant.now();
+    long timestampSeconds = now.getEpochSecond();
+    String signature = signer.sign(delivery.id(), timestampSeconds, bodyBytes, secretPlaintext);
+
+    Map<String, String> headers =
+        Map.of(
+            "webhook-id", delivery.id().toString(),
+            "webhook-timestamp", Long.toString(timestampSeconds),
+            "webhook-signature", signature);
+
     com.hookrelay.delivery.domain.DeliveryAttempt attempt =
         transactions
             .execute(tx -> deliveryStore.startAttempt(projectId, deliveryId, leaseToken))
@@ -77,20 +95,34 @@ public class DeliveryWorker {
       return null;
     }
 
-    Delivery delivery = deliveryStore.find(projectId, deliveryId).orElseThrow();
-
     TransportResult result;
     try {
-      result = sendDelivery(delivery);
+      result = transport.send(delivery.destinationUrl(), bodyBytes, headers);
     } catch (Exception e) {
-      result = TransportResult.failure(e);
+      long durationMs = Duration.between(Instant.now(), Instant.now()).toMillis();
+      result =
+          new TransportResult(
+              0,
+              null,
+              Instant.now(),
+              AttemptOutcome.RETRYABLE_FAILURE,
+              durationMs,
+              "TRANSPORT_FAILURE",
+              null);
     }
 
     Instant retryAt = result.retryAt();
-    if (retryAt == null && result.outcome() == AttemptOutcome.RETRYABLE_FAILURE) {
-      retryAt = nowPlusRetry(delivery);
+    Instant now2 = Instant.now();
+    if (retryAt != null && result.outcome() == AttemptOutcome.RETRYABLE_FAILURE) {
+      long delaySeconds = Duration.between(now2, retryAt).getSeconds();
+      if (delaySeconds < 0) {
+        delaySeconds = 0;
+      }
+      retryAt =
+          retryScheduler.nextAttemptAt(delivery.cycleAttemptCount(), (int) delaySeconds, now2);
+    } else if (result.outcome() == AttemptOutcome.RETRYABLE_FAILURE) {
+      retryAt = retryScheduler.nextAttemptAt(delivery.cycleAttemptCount(), null, now2);
     }
-
     final TransportResult finalResult = result;
     final Instant finalRetryAt = retryAt;
 
@@ -108,41 +140,5 @@ public class DeliveryWorker {
               finalRetryAt);
       return finalized ? deliveryStore.find(projectId, deliveryId).orElse(null).status() : null;
     });
-  }
-
-  private TransportResult sendDelivery(Delivery delivery) throws TransportException {
-    Instant now = Instant.now();
-    long timestampSeconds = now.getEpochSecond();
-
-    FanoutSnapshot snapshot =
-        fanoutStore.find(delivery.projectId(), delivery.eventId()).orElseThrow();
-    byte[] bodyBytes = snapshot.body();
-
-    String secretPlaintext =
-        endpointService.getSigningSecret(delivery.endpointId(), delivery.projectId());
-    String signature = signer.sign(delivery.id(), timestampSeconds, bodyBytes, secretPlaintext);
-
-    Map<String, String> headers =
-        Map.of(
-            "webhook-id", delivery.id().toString(),
-            "webhook-timestamp", Long.toString(timestampSeconds),
-            "webhook-signature", signature);
-
-    Instant sendStart = Instant.now();
-    TransportResult result = transport.send(delivery.destinationUrl(), bodyBytes, headers);
-    long durationMs = Duration.between(sendStart, Instant.now()).toMillis();
-
-    return new TransportResult(
-        result.statusCode(),
-        result.body(),
-        result.sentAt(),
-        result.outcome(),
-        durationMs,
-        result.errorCode(),
-        result.retryAt());
-  }
-
-  private Instant nowPlusRetry(Delivery delivery) {
-    return retryScheduler.nextAttemptAt(delivery.attemptCount() + 1, null, Instant.now());
   }
 }

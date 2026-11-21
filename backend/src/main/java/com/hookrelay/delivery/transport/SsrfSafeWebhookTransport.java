@@ -250,15 +250,19 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
         try {
           responseBody = readBounded(response.getEntity(), properties.maxResponseBodyBytes());
         } catch (TransportException e) {
-          // Read failure after successful HTTP response - preserve HTTP status code
+          // Read failure after HTTP response - preserve HTTP status code outcome
+          AttemptOutcome outcome;
+          if (statusCode >= 200 && statusCode < 300) {
+            outcome = AttemptOutcome.SUCCEEDED;
+          } else if (statusCode == 408
+              || statusCode == 429
+              || (statusCode >= 500 && statusCode < 600)) {
+            outcome = AttemptOutcome.RETRYABLE_FAILURE;
+          } else {
+            outcome = AttemptOutcome.PERMANENT_FAILURE;
+          }
           return new TransportResult(
-              statusCode,
-              null,
-              Instant.now(),
-              AttemptOutcome.PERMANENT_FAILURE,
-              null,
-              "RESPONSE_READ_FAILED",
-              null);
+              statusCode, null, Instant.now(), outcome, null, "RESPONSE_READ_FAILED", null);
         }
         Instant sentAt = Instant.now();
         AttemptOutcome outcome;
