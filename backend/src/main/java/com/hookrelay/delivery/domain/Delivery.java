@@ -2,8 +2,10 @@ package com.hookrelay.delivery.domain;
 
 import java.time.Instant;
 import java.util.UUID;
+import lombok.Builder;
 
 /** Internal persistence model; never expose destination or internal lease details as an API DTO. */
+@Builder
 public record Delivery(
     UUID id,
     UUID projectId,

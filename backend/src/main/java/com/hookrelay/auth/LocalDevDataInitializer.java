@@ -3,8 +3,7 @@ package com.hookrelay.auth;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
@@ -12,10 +11,10 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+@Slf4j
 @Component
 @Profile("local")
 public class LocalDevDataInitializer implements ApplicationRunner {
-  private static final Logger log = LoggerFactory.getLogger(LocalDevDataInitializer.class);
   private static final UUID ORGANIZATION_ID =
       UUID.fromString("11111111-1111-4111-8111-111111111111");
   private static final UUID PROJECT_ID = UUID.fromString("22222222-2222-4222-8222-222222222222");
