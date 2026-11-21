@@ -137,7 +137,7 @@ Rules:
 - Remove unused imports and avoid wildcard imports in production source.
 - Use import statements for classes from other packages; do not use fully-qualified class names in method signatures, field declarations, variable declarations, catch clauses, `instanceof` checks, or annotations. Import the class and use its simple name. Use fully-qualified names only when necessary to resolve ambiguity between same-named classes from different packages.
 - Prefer standard Java APIs over third-party utilities for simple operations.
-- Do not add Lombok by default. Use records for immutable data carriers when appropriate and keep generated behavior explicit and debuggable.
+- Use Lombok where possible to reduce boilerplate (`@Value`, `@Builder`, `@Slf4j`, etc.). Lombok is not managed by the Spring Boot BOM, so pin its version explicitly via the version catalog. For data carriers, prefer Lombok `@Value` with `@Builder` over plain constructors; use `record` only when bean validation or serialization requires it. Keep generated behavior explicit and debuggable.
 - Do not suppress compiler warnings globally. Fix the cause or narrowly suppress a documented unavoidable warning.
 
 ### 3.5 Import review before completion
@@ -417,6 +417,7 @@ When implemented:
 
 - Use Java 25 language features when they improve clarity, not merely because they are new.
 - Prefer `record` for immutable API DTOs/value carriers where bean validation and serialization work correctly.
+- Prefer Lombok `@Builder` over plain constructors for data carriers with multiple fields; avoid telescoping constructors. Use `@Builder` with `@Value`/`@Data` for immutable objects.
 - Use `Instant` for timestamps and `Duration` for elapsed/timeout values. Persist and emit instants in UTC.
 - Use `BigDecimal` for money; never use `float` or `double` for currency or exact monetary quantities.
 - Use `UUID` or another explicit stable identifier; do not expose database sequence implementation details.
