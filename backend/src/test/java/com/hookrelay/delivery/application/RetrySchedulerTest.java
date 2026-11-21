@@ -62,7 +62,7 @@ class RetrySchedulerTest {
   @Test
   void beyondCycleDeadlineReturnsNull() {
     Instant now = Instant.parse("2026-01-01T00:00:00Z");
-    RetryScheduler shortScheduler = new RetryScheduler(10, 3600, Duration.ofSeconds(5));
+    RetryScheduler shortScheduler = new RetryScheduler(10, 3600, Duration.ofSeconds(4));
     Instant result = shortScheduler.nextAttemptAt(1, null, now);
     assertThat(result).isNull();
   }

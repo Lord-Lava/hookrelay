@@ -1,7 +1,6 @@
 package com.hookrelay.delivery.application;
 
 import com.hookrelay.delivery.domain.Delivery;
-import com.hookrelay.delivery.domain.DeliveryStatus;
 import com.hookrelay.delivery.repository.DeliveryStore;
 import java.time.Instant;
 import java.util.List;
@@ -67,14 +66,10 @@ public class DeliveryDispatcher {
       }
 
       try {
-        DeliveryStatus status =
-            deliveryWorker.process(delivery.projectId(), delivery.id(), delivery.leaseToken());
-        if (status == null) {
-          // Claim was lost to another instance; release capacity
-          dispatchControl.release(delivery.projectId(), delivery.endpointId());
-        }
+        deliveryWorker.process(delivery.projectId(), delivery.id(), delivery.leaseToken());
       } catch (Exception e) {
         log.warn("Delivery {} processing failed: {}", delivery.id(), e.getMessage(), e);
+      } finally {
         dispatchControl.release(delivery.projectId(), delivery.endpointId());
       }
     }
@@ -103,7 +98,7 @@ public class DeliveryDispatcher {
 
       try {
         deliveryStore.recoverExpired(
-            delivery.projectId(), delivery.id(), delivery.leaseToken(), now);
+            delivery.projectId(), delivery.id(), delivery.leaseToken(), Instant.now());
         dispatchControl.release(delivery.projectId(), delivery.endpointId());
       } catch (Exception e) {
         log.warn("Lease recovery for delivery {} failed: {}", delivery.id(), e.getMessage(), e);

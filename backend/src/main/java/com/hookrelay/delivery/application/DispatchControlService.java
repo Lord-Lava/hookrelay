@@ -106,7 +106,7 @@ public class DispatchControlService {
   private static void recordStart(
       ConcurrentHashMap<UUID, ConcurrentLinkedDeque<Instant>> map, UUID id, Instant now) {
     timesMap(map, id).addLast(now);
-    prune(map.get(id), now);
+    prune(map, id, map.get(id), now);
   }
 
   private static ConcurrentLinkedDeque<Instant> timesMap(
@@ -114,11 +114,18 @@ public class DispatchControlService {
     return map.computeIfAbsent(id, k -> new ConcurrentLinkedDeque<>());
   }
 
-  private static void prune(ConcurrentLinkedDeque<Instant> times, Instant now) {
+  private static void prune(
+      ConcurrentHashMap<UUID, ConcurrentLinkedDeque<Instant>> map,
+      UUID id,
+      ConcurrentLinkedDeque<Instant> times,
+      Instant now) {
     Duration window = Duration.ofSeconds(1);
     Instant cutoff = now.minus(window);
     while (!times.isEmpty() && times.peekFirst().isBefore(cutoff)) {
       times.pollFirst();
+    }
+    if (times.isEmpty()) {
+      map.remove(id, times);
     }
   }
 }

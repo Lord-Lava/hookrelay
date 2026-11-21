@@ -14,6 +14,8 @@ import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -244,7 +246,20 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
 
       try (CloseableHttpResponse response = httpClient.execute(target, httpPost, context)) {
         int statusCode = response.getCode();
-        String responseBody = readBounded(response.getEntity(), properties.maxResponseBodyBytes());
+        String responseBody;
+        try {
+          responseBody = readBounded(response.getEntity(), properties.maxResponseBodyBytes());
+        } catch (TransportException e) {
+          // Read failure after successful HTTP response - preserve HTTP status code
+          return new TransportResult(
+              statusCode,
+              null,
+              Instant.now(),
+              AttemptOutcome.PERMANENT_FAILURE,
+              null,
+              "RESPONSE_READ_FAILED",
+              null);
+        }
         Instant sentAt = Instant.now();
         AttemptOutcome outcome;
         if (statusCode >= 200 && statusCode < 300) {
@@ -256,7 +271,31 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
         } else {
           outcome = AttemptOutcome.PERMANENT_FAILURE;
         }
-        return new TransportResult(statusCode, responseBody, sentAt, outcome, null, null, null);
+
+        // Parse Retry-After hint for retryable responses
+        Instant retryAt = null;
+        String retryAfterHeader =
+            response.getFirstHeader("Retry-After") == null
+                ? null
+                : response.getFirstHeader("Retry-After").getValue();
+        if (retryAfterHeader != null && outcome == AttemptOutcome.RETRYABLE_FAILURE) {
+          try {
+            long retryAfterSeconds = Long.parseLong(retryAfterHeader.trim());
+            if (retryAfterSeconds > 0) {
+              retryAt = sentAt.plusSeconds(retryAfterSeconds);
+            }
+          } catch (NumberFormatException e) {
+            // Try HTTP date format
+            try {
+              retryAt =
+                  Instant.from(DateTimeFormatter.RFC_1123_DATE_TIME.parse(retryAfterHeader.trim()));
+            } catch (DateTimeParseException e2) {
+              // Ignore unparseable Retry-After
+            }
+          }
+        }
+
+        return new TransportResult(statusCode, responseBody, sentAt, outcome, null, null, retryAt);
       }
     } catch (SsrfValidationException e) {
       // Permanent policy failure - URL validation or DNS address policy rejected.

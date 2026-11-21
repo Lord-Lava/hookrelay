@@ -72,6 +72,12 @@ public class DeliveryStore {
           AND cycle_deadline > ?
           AND cycle_attempt_count < max_attempts
           AND lease_owner IS NULL
+          AND EXISTS (
+            SELECT 1 FROM endpoints e
+            WHERE e.id = deliveries.endpoint_id
+              AND e.project_id = deliveries.project_id
+              AND e.enabled AND e.deleted_at IS NULL
+          )
         ORDER BY next_attempt_at ASC, created_at ASC, id ASC
         LIMIT ?
         """,

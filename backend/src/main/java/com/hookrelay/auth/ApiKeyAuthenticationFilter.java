@@ -47,10 +47,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
       HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
       throws ServletException, IOException {
     String rawKey = request.getHeader("X-Api-Key");
-    log.debug("Auth filter: received X-Api-Key header: {}", rawKey);
     var identity = apiKeyAuthService.authenticate(rawKey);
     if (identity.isEmpty()) {
-      log.warn("Auth filter: authentication failed for key: {}", rawKey);
       authenticationEntryPoint.commence(request, response);
       return;
     }

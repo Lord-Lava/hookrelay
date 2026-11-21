@@ -11,6 +11,7 @@ import com.hookrelay.delivery.transport.TransportException;
 import com.hookrelay.delivery.transport.TransportResult;
 import com.hookrelay.delivery.transport.WebhookTransport;
 import com.hookrelay.endpoint.application.EndpointService;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -103,7 +104,7 @@ public class DeliveryWorker {
               leaseToken,
               attempt.id(),
               finalResult.outcome(),
-              finalResult.statusCode(),
+              finalResult.statusCode() == 0 ? null : finalResult.statusCode(),
               finalResult.durationMs(),
               finalResult.errorCode(),
               finalRetryAt);
@@ -129,7 +130,18 @@ public class DeliveryWorker {
             "webhook-timestamp", Long.toString(timestampSeconds),
             "webhook-signature", signature);
 
-    return transport.send(delivery.destinationUrl(), bodyBytes, headers);
+    Instant sendStart = Instant.now();
+    TransportResult result = transport.send(delivery.destinationUrl(), bodyBytes, headers);
+    long durationMs = Duration.between(sendStart, Instant.now()).toMillis();
+
+    return new TransportResult(
+        result.statusCode(),
+        result.body(),
+        result.sentAt(),
+        result.outcome(),
+        durationMs,
+        result.errorCode(),
+        result.retryAt());
   }
 
   private Instant nowPlusRetry(Delivery delivery) {

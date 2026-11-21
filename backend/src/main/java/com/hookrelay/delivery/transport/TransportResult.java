@@ -52,12 +52,6 @@ public record TransportResult(
   /** Generic failure with exception. */
   public static TransportResult failure(Exception e) {
     return new TransportResult(
-        0,
-        null,
-        Instant.now(),
-        AttemptOutcome.RETRYABLE_FAILURE,
-        null,
-        e.getClass().getSimpleName(),
-        null);
+        0, null, Instant.now(), AttemptOutcome.RETRYABLE_FAILURE, null, "TRANSPORT_FAILURE", null);
   }
 }
