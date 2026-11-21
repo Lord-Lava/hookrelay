@@ -58,10 +58,24 @@ public class DeliveryDispatcher {
       }
 
       try {
-        deliveryWorker.process(delivery.projectId(), delivery.id(), delivery.leaseToken());
+        var claimed =
+            deliveryStore.claim(
+                delivery.projectId(), delivery.id(), "dispatcher", properties.leaseDuration());
+        if (claimed.isEmpty()) {
+          // Claim lost to another instance
+          dispatchControl.release(delivery.projectId(), delivery.endpointId());
+          continue;
+        }
+
+        try {
+          deliveryWorker.process(delivery.projectId(), delivery.id(), claimed.get().leaseToken());
+        } catch (Exception e) {
+          log.warn("Delivery {} processing failed: {}", delivery.id(), e.getMessage(), e);
+        } finally {
+          dispatchControl.release(delivery.projectId(), delivery.endpointId());
+        }
       } catch (Exception e) {
-        log.warn("Delivery {} processing failed: {}", delivery.id(), e.getMessage(), e);
-      } finally {
+        log.warn("Delivery {} claim failed: {}", delivery.id(), e.getMessage(), e);
         dispatchControl.release(delivery.projectId(), delivery.endpointId());
       }
     }
