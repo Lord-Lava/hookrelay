@@ -16,11 +16,9 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLException;
-import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocket;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
@@ -35,8 +33,8 @@ import org.apache.hc.client5.http.ssl.TlsSocketStrategy;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.HttpEntity;
 import org.apache.hc.core5.http.HttpHost;
-import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
+import org.apache.hc.core5.http.protocol.HttpContext;
 import org.apache.hc.core5.util.TimeValue;
 import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.DisposableBean;
@@ -62,31 +60,6 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
   private final WebhookTransportProperties properties;
 
   private static final String ORIGINAL_HOSTNAME_ATTR = "hookrelay.ssl.originalHostname";
-
-  /** Thread-local carrying the original hostname for TLS verification during each request. */
-  private static final ThreadLocal<String> ORIGINAL_HOSTNAME_THREAD_LOCAL =
-      ThreadLocal.withInitial(() -> null);
-
-  /**
-   * Hostname verifier that checks the TLS certificate against the original URL hostname (not the
-   * resolved IP address). Used instead of {@link NoopHostnameVerifier} so Apache HttpClient enforces
-   * hostname verification during the TLS handshake, before any request data is transmitted.
-   */
-  private static class OriginalHostnameVerifier implements HostnameVerifier {
-    @Override
-    public boolean verify(String host, SSLSession session) {
-      String originalHostname = ORIGINAL_HOSTNAME_THREAD_LOCAL.get();
-      if (originalHostname == null || originalHostname.isBlank()) {
-        return false;
-      }
-      try {
-        return HttpsURLConnection.getDefaultHostnameVerifier()
-            .verify(originalHostname, session);
-      } catch (Exception e) {
-        return false;
-      }
-    }
-  }
 
   @Autowired
   public SsrfSafeWebhookTransport(
@@ -118,22 +91,32 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException("Default SSLContext unavailable", e);
     }
-    // Use a hostname verifier that checks the TLS certificate against the original URL hostname,
-    // not the resolved IP address. This enforces verification during the TLS handshake, before
-    // any request data is transmitted.
+    // Use the JDK's default hostname verifier against the original URL hostname (not the resolved
+    // IP address). Apache HttpClient enforces verification during the TLS handshake via
+    // SSLConnectionSocketFactory.verifyHostname(), throwing SSLPeerUnverifiedException on mismatch.
     SSLConnectionSocketFactory sslSocketFactory =
-        new SSLConnectionSocketFactory(sslContext, new OriginalHostnameVerifier());
-    TlsSocketStrategy tlsSocketStrategy = new TlsSocketStrategy() {
-      @Override
-      public SSLSocket upgrade(
-          Socket socket, String hostname, int port, Object attachment, HttpContext context) {
-        try {
-          return (SSLSocket) sslSocketFactory.createLayeredSocket(socket, hostname, port, context);
-        } catch (IOException e) {
-          throw new IllegalStateException("TLS upgrade failed: " + e.getMessage(), e);
-        }
-      }
-    };
+        new SSLConnectionSocketFactory(sslContext, HttpsURLConnection.getDefaultHostnameVerifier());
+    TlsSocketStrategy tlsSocketStrategy =
+        new TlsSocketStrategy() {
+          @Override
+          public SSLSocket upgrade(
+              Socket socket, String hostname, int port, Object attachment, HttpContext context) {
+            try {
+              // Use the original URL hostname (not the resolved IP) as the TLS peer name so SNI and
+              // certificate verification are performed against the expected hostname. The TCP
+              // connection is already pinned to the validated IP address; no additional DNS lookup
+              // occurs.
+              String tlsPeerName = (String) context.getAttribute(ORIGINAL_HOSTNAME_ATTR);
+              if (tlsPeerName == null || tlsPeerName.isBlank()) {
+                tlsPeerName = hostname;
+              }
+              return (SSLSocket)
+                  sslSocketFactory.createLayeredSocket(socket, tlsPeerName, port, context);
+            } catch (IOException e) {
+              throw new IllegalStateException("TLS upgrade failed: " + e.getMessage(), e);
+            }
+          }
+        };
     PoolingHttpClientConnectionManager connectionManager =
         PoolingHttpClientConnectionManagerBuilder.create()
             .setTlsSocketStrategy(tlsSocketStrategy)
@@ -257,14 +240,11 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
 
       HttpClientContext context = HttpClientContext.create();
       context.setAttribute(ORIGINAL_HOSTNAME_ATTR, uri.getHost());
-      ORIGINAL_HOSTNAME_THREAD_LOCAL.set(uri.getHost());
 
       try (CloseableHttpResponse response = httpClient.execute(target, httpPost, context)) {
         int statusCode = response.getCode();
         String responseBody = readBounded(response.getEntity(), properties.maxResponseBodyBytes());
         return new TransportResult(statusCode, responseBody, Instant.now());
-      } finally {
-        ORIGINAL_HOSTNAME_THREAD_LOCAL.remove();
       }
     } catch (SsrfValidationException e) {
       // Permanent policy failure - URL validation or DNS address policy rejected.
