@@ -7,6 +7,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -16,6 +18,8 @@ import tools.jackson.databind.ObjectMapper;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE + 10)
 public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
+
+  private static final Logger log = LoggerFactory.getLogger(ApiKeyAuthenticationFilter.class);
 
   private final ApiKeyAuthService apiKeyAuthService;
   private final AuthenticationEntryPoint authenticationEntryPoint;
@@ -43,8 +47,10 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
       HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
       throws ServletException, IOException {
     String rawKey = request.getHeader("X-Api-Key");
+    log.debug("Auth filter: received X-Api-Key header: {}", rawKey);
     var identity = apiKeyAuthService.authenticate(rawKey);
     if (identity.isEmpty()) {
+      log.warn("Auth filter: authentication failed for key: {}", rawKey);
       authenticationEntryPoint.commence(request, response);
       return;
     }
