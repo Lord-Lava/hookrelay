@@ -55,6 +55,52 @@ public class DeliveryStore {
         offset);
   }
 
+  /**
+   * Lists due deliveries ready for claiming: PENDING or RETRY_SCHEDULED with next_attempt_at at or
+   * before now, within cycle deadline, and below max attempts. Ordered by next_attempt_at then
+   * created_at for fairness. Callers should claim each with {@link #claim(UUID, UUID, String,
+   * java.time.Duration)} which performs row-level locking.
+   */
+  public List<Delivery> listDue(Instant now, int limit) {
+    if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Invalid limit");
+    return jdbc.query(
+        """
+        SELECT * FROM deliveries
+        WHERE status IN ('PENDING', 'RETRY_SCHEDULED')
+          AND next_attempt_at IS NOT NULL
+          AND next_attempt_at <= ?
+          AND cycle_deadline > ?
+          AND cycle_attempt_count < max_attempts
+          AND lease_owner IS NULL
+        ORDER BY next_attempt_at ASC, created_at ASC, id ASC
+        LIMIT ?
+        """,
+        (rs, row) -> delivery(rs),
+        Timestamp.from(now),
+        Timestamp.from(now),
+        limit);
+  }
+
+  /**
+   * Lists in-progress deliveries with expired leases for recovery. Callers should reclaim each with
+   * {@link #recoverExpired(UUID, UUID, UUID, java.time.Instant)}.
+   */
+  public List<Delivery> listExpiredLeases(Instant now, int limit) {
+    if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Invalid limit");
+    return jdbc.query(
+        """
+        SELECT * FROM deliveries
+        WHERE status = 'IN_PROGRESS'
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at <= ?
+        ORDER BY lease_expires_at ASC, created_at ASC, id ASC
+        LIMIT ?
+        """,
+        (rs, row) -> delivery(rs),
+        Timestamp.from(now),
+        limit);
+  }
+
   public List<DeliveryAttempt> attempts(UUID projectId, UUID id, int limit, long offset) {
     checkPage(limit, offset);
     return jdbc.query(

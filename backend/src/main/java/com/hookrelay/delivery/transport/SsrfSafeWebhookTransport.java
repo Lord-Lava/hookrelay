@@ -1,5 +1,6 @@
 package com.hookrelay.delivery.transport;
 
+import com.hookrelay.delivery.domain.AttemptOutcome;
 import com.hookrelay.security.ssrf.DnsResolver;
 import com.hookrelay.security.ssrf.SsrfUrlValidator;
 import com.hookrelay.security.ssrf.SsrfValidationException;
@@ -244,7 +245,18 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
       try (CloseableHttpResponse response = httpClient.execute(target, httpPost, context)) {
         int statusCode = response.getCode();
         String responseBody = readBounded(response.getEntity(), properties.maxResponseBodyBytes());
-        return new TransportResult(statusCode, responseBody, Instant.now());
+        Instant sentAt = Instant.now();
+        AttemptOutcome outcome;
+        if (statusCode >= 200 && statusCode < 300) {
+          outcome = AttemptOutcome.SUCCEEDED;
+        } else if (statusCode == 408
+            || statusCode == 429
+            || (statusCode >= 500 && statusCode < 600)) {
+          outcome = AttemptOutcome.RETRYABLE_FAILURE;
+        } else {
+          outcome = AttemptOutcome.PERMANENT_FAILURE;
+        }
+        return new TransportResult(statusCode, responseBody, sentAt, outcome, null, null, null);
       }
     } catch (SsrfValidationException e) {
       // Permanent policy failure - URL validation or DNS address policy rejected.
