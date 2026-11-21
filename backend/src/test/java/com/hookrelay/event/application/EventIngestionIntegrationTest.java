@@ -7,7 +7,12 @@ import com.hookrelay.auth.ApiKeyAuthService;
 import com.hookrelay.event.api.CreateEventRequest;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -262,11 +267,9 @@ class EventIngestionIntegrationTest {
   @Test
   void concurrentIdenticalRequestsCreateOneEventAndOutbox() throws Exception {
     var request = buildRequest("payment.succeeded", new PaymentPayload("race", 1));
-    var start = new java.util.concurrent.CountDownLatch(1);
-    try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
-      var futures =
-          new java.util.ArrayList<
-              java.util.concurrent.Future<EventIngestionService.AcceptedEvent>>();
+    var start = new CountDownLatch(1);
+    try (var executor = Executors.newFixedThreadPool(8)) {
+      var futures = new ArrayList<Future<EventIngestionService.AcceptedEvent>>();
       for (int i = 0; i < 8; i++) {
         futures.add(
             executor.submit(() -> {
@@ -275,8 +278,8 @@ class EventIngestionIntegrationTest {
             }));
       }
       start.countDown();
-      var results = new java.util.ArrayList<EventIngestionService.AcceptedEvent>();
-      for (var future : futures) results.add(future.get(15, java.util.concurrent.TimeUnit.SECONDS));
+      var results = new ArrayList<EventIngestionService.AcceptedEvent>();
+      for (var future : futures) results.add(future.get(15, TimeUnit.SECONDS));
       assertThat(results.stream().map(EventIngestionService.AcceptedEvent::eventId).distinct())
           .hasSize(1);
       assertThat(results.stream().filter(r -> !r.replayed())).hasSize(1);

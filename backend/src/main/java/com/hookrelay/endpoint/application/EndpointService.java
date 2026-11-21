@@ -3,6 +3,7 @@ package com.hookrelay.endpoint.application;
 import com.hookrelay.endpoint.domain.WebhookEndpoint;
 import com.hookrelay.endpoint.repository.WebhookEndpointRepository;
 import com.hookrelay.security.SigningSecretService;
+import com.hookrelay.security.SigningUnavailableException;
 import com.hookrelay.security.ssrf.SsrfUrlValidator;
 import java.util.List;
 import java.util.UUID;
@@ -10,6 +11,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.ObjectMapper;
 
 @Service
@@ -20,7 +22,7 @@ public class EndpointService {
   private final JdbcTemplate jdbcTemplate;
   private final ObjectMapper objectMapper;
   private final SsrfUrlValidator ssrfUrlValidator;
-  private final org.springframework.transaction.support.TransactionTemplate transactions;
+  private final TransactionTemplate transactions;
 
   public EndpointService(
       WebhookEndpointRepository endpointRepository,
@@ -28,7 +30,7 @@ public class EndpointService {
       JdbcTemplate jdbcTemplate,
       ObjectMapper objectMapper,
       SsrfUrlValidator ssrfUrlValidator,
-      org.springframework.transaction.support.TransactionTemplate transactions) {
+      TransactionTemplate transactions) {
     this.endpointRepository = endpointRepository;
     this.signingSecretService = signingSecretService;
     this.jdbcTemplate = jdbcTemplate;
@@ -50,8 +52,7 @@ public class EndpointService {
   private CreatedEndpointResult createValidatedEndpoint(
       UUID projectId, String url, String description) {
 
-    if (!signingSecretService.isConfigured())
-      throw new com.hookrelay.security.SigningUnavailableException();
+    if (!signingSecretService.isConfigured()) throw new SigningUnavailableException();
 
     jdbcTemplate.queryForObject(
         "SELECT id FROM projects WHERE id=? FOR UPDATE", UUID.class, projectId);
@@ -202,7 +203,7 @@ public class EndpointService {
    */
   public String getSigningSecret(UUID id, UUID projectId) {
     if (!signingSecretService.isConfigured()) {
-      throw new com.hookrelay.security.SigningUnavailableException();
+      throw new SigningUnavailableException();
     }
     WebhookEndpoint endpoint = getEndpoint(id, projectId);
     if (endpoint.signingSecretCiphertext() == null
@@ -223,7 +224,7 @@ public class EndpointService {
   @Transactional
   public RotateSecretResult rotateSigningSecret(UUID id, UUID projectId) {
     if (!signingSecretService.isConfigured()) {
-      throw new com.hookrelay.security.SigningUnavailableException();
+      throw new SigningUnavailableException();
     }
 
     WebhookEndpoint existing = lockEndpoint(id, projectId);

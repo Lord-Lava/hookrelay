@@ -1,5 +1,6 @@
 package com.hookrelay.endpoint.repository;
 
+import com.hookrelay.endpoint.application.EndpointNotFoundException;
 import com.hookrelay.endpoint.domain.WebhookEndpoint;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -173,8 +174,7 @@ public class WebhookEndpointRepository {
             keyVersion,
             id,
             projectId);
-    if (changed == 0)
-      throw new com.hookrelay.endpoint.application.EndpointNotFoundException("Endpoint not found");
+    if (changed == 0) throw new EndpointNotFoundException("Endpoint not found");
     return findByIdAndProject(id, projectId).orElseThrow();
   }
 

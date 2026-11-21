@@ -4,8 +4,12 @@ import jakarta.annotation.PreDestroy;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.springframework.stereotype.Component;
 
 /** Bounds callers and queued DNS work even when the platform resolver cannot be interrupted. */
@@ -23,10 +27,10 @@ public class SystemDnsResolver implements DnsResolver {
 
   @Override
   public InetAddress[] resolve(String host) throws UnknownHostException {
-    java.util.concurrent.Future<InetAddress[]> future;
+    Future<InetAddress[]> future;
     try {
       future = executor.submit(() -> InetAddress.getAllByName(host));
-    } catch (java.util.concurrent.RejectedExecutionException exception) {
+    } catch (RejectedExecutionException exception) {
       throw new UnknownHostException("DNS capacity unavailable");
     }
     try {
@@ -34,8 +38,7 @@ public class SystemDnsResolver implements DnsResolver {
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
       throw new UnknownHostException("DNS lookup interrupted");
-    } catch (java.util.concurrent.ExecutionException
-        | java.util.concurrent.TimeoutException exception) {
+    } catch (ExecutionException | TimeoutException exception) {
       throw new UnknownHostException("DNS lookup unavailable");
     } finally {
       future.cancel(true);

@@ -5,9 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 
+import com.hookrelay.security.ssrf.DnsResolver;
 import com.hookrelay.security.ssrf.SsrfUrlValidator;
 import com.hookrelay.security.ssrf.SsrfValidationException;
 import java.time.Duration;
+import java.util.UUID;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -15,14 +17,14 @@ import org.junit.jupiter.api.Test;
 class SsrfSafeWebhookTransportTest {
 
   private SsrfUrlValidator urlValidator;
-  private com.hookrelay.security.ssrf.DnsResolver dnsResolver;
+  private DnsResolver dnsResolver;
   private WebhookTransportProperties properties;
   private CloseableHttpClient httpClient;
 
   @BeforeEach
   void setUp() {
     urlValidator = mock(SsrfUrlValidator.class);
-    dnsResolver = mock(com.hookrelay.security.ssrf.DnsResolver.class);
+    dnsResolver = mock(DnsResolver.class);
     properties =
         new WebhookTransportProperties(
             Duration.ofSeconds(3), Duration.ofSeconds(5), Duration.ofSeconds(15), 8192, 16, 4);
@@ -87,8 +89,8 @@ class SsrfSafeWebhookTransportTest {
 
   @Test
   void givenTwoRandomUuids_whenGenerated_thenTheyAreDistinct() {
-    java.util.UUID id1 = java.util.UUID.randomUUID();
-    java.util.UUID id2 = java.util.UUID.randomUUID();
+    UUID id1 = UUID.randomUUID();
+    UUID id2 = UUID.randomUUID();
     assertThat(id1).isNotEqualTo(id2);
   }
 }

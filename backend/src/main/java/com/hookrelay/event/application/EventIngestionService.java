@@ -3,6 +3,7 @@ package com.hookrelay.event.application;
 import com.hookrelay.auth.ApiKeyAuthService;
 import com.hookrelay.event.api.CreateEventRequest;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
@@ -153,7 +154,7 @@ public class EventIngestionService {
   }
 
   private boolean constantTimeEquals(String left, String right) {
-    return java.security.MessageDigest.isEqual(
+    return MessageDigest.isEqual(
         left.getBytes(StandardCharsets.US_ASCII), right.getBytes(StandardCharsets.US_ASCII));
   }
 

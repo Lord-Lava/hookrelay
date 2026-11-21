@@ -3,12 +3,18 @@ package com.hookrelay.delivery.repository;
 import com.hookrelay.delivery.domain.DeliveryPolicy;
 import com.hookrelay.delivery.domain.FanoutSnapshot;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -79,7 +85,7 @@ public class FanoutStore {
         body,
         policy,
         recipients.isEmpty() ? "false" : "e.id IN (:ids)",
-        java.util.Map.of("ids", recipients),
+        Map.of("ids", recipients),
         recipients.size());
   }
 
@@ -95,7 +101,7 @@ public class FanoutStore {
         EXISTS (SELECT 1 FROM endpoint_subscriptions s WHERE s.endpoint_id=e.id
           AND s.event_type=:type AND s.deleted_at IS NULL)
         """,
-        java.util.Map.of("type", eventType),
+        Map.of("type", eventType),
         null);
   }
 
@@ -105,12 +111,12 @@ public class FanoutStore {
       byte[] body,
       DeliveryPolicy policy,
       String selection,
-      java.util.Map<String, ?> selectionParameters,
+      Map<String, ?> selectionParameters,
       Integer expectedCount) {
     byte[] immutableBody = body.clone();
     if (immutableBody.length < 2 || immutableBody.length > 270336)
       throw new IllegalArgumentException("Invalid fan-out body");
-    java.util.Objects.requireNonNull(policy, "policy");
+    Objects.requireNonNull(policy, "policy");
     return transactions.execute(tx -> {
       var events =
           jdbc.query(
@@ -128,15 +134,14 @@ public class FanoutStore {
               eventId)
           != 0) throw new IllegalStateException("Incomplete existing fan-out requires review");
       Instant startedAt =
-          jdbc.queryForObject("SELECT clock_timestamp()", java.time.OffsetDateTime.class)
-              .toInstant();
+          jdbc.queryForObject("SELECT clock_timestamp()", OffsetDateTime.class).toInstant();
       Instant deadline = startedAt.plus(policy.horizon());
-      Instant retentionEnd = events.getFirst().plus(java.time.Duration.ofDays(30));
+      Instant retentionEnd = events.getFirst().plus(Duration.ofDays(30));
       if (deadline.isAfter(retentionEnd)) deadline = retentionEnd;
       if (!deadline.isAfter(startedAt))
         throw new IllegalStateException("Event retention window expired");
       var parameters =
-          new org.springframework.jdbc.core.namedparam.MapSqlParameterSource()
+          new MapSqlParameterSource()
               .addValues(selectionParameters)
               .addValue("project", projectId)
               .addValue("event", eventId)
@@ -166,7 +171,7 @@ public class FanoutStore {
           """
               .formatted(selection);
       int count =
-          new org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate(jdbc)
+          new NamedParameterJdbcTemplate(jdbc)
               .queryForObject(
                   sql,
                   parameters,

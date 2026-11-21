@@ -9,6 +9,9 @@ import com.hookrelay.endpoint.application.EndpointNotFoundException;
 import com.hookrelay.endpoint.application.EndpointService;
 import com.hookrelay.endpoint.domain.WebhookEndpoint;
 import com.hookrelay.endpoint.repository.WebhookEndpointRepository;
+import com.hookrelay.security.AesGcmSigningSecretService;
+import com.hookrelay.security.SigningSecretService;
+import com.hookrelay.security.SigningUnavailableException;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -18,18 +21,23 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
+import tools.jackson.databind.ObjectMapper;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.NONE)
 @Testcontainers
@@ -461,25 +469,25 @@ class EndpointControllerIntegrationTest {
 
   @Test
   void rotateSecretRequiresEncryptionConfigured() {
-    var unconfigured = new com.hookrelay.security.AesGcmSigningSecretService("", "v1");
+    var unconfigured = new AesGcmSigningSecretService("", "v1");
     unconfigured.afterPropertiesSet();
     var service =
         new EndpointService(
             endpointRepository, unconfigured, jdbcTemplate, mapper, url -> {}, transactions);
     assertThatThrownBy(() -> service.createEndpoint(projectId, "https://8.8.8.8/missing", null))
-        .isInstanceOf(com.hookrelay.security.SigningUnavailableException.class);
+        .isInstanceOf(SigningUnavailableException.class);
     assertThat(endpointService.countEndpoints(projectId)).isZero();
     assertThatThrownBy(() -> service.rotateSigningSecret(UUID.randomUUID(), projectId))
-        .isInstanceOf(com.hookrelay.security.SigningUnavailableException.class);
+        .isInstanceOf(SigningUnavailableException.class);
   }
 
-  @Autowired private com.hookrelay.security.SigningSecretService secrets;
-  @Autowired private tools.jackson.databind.ObjectMapper mapper;
-  @Autowired private org.springframework.transaction.support.TransactionTemplate transactions;
+  @Autowired private SigningSecretService secrets;
+  @Autowired private ObjectMapper mapper;
+  @Autowired private TransactionTemplate transactions;
 
   @Test
   void resolvesDnsOutsideDatabaseTransactions() {
-    var calls = new java.util.concurrent.atomic.AtomicInteger();
+    var calls = new AtomicInteger();
     var service =
         new EndpointService(
             endpointRepository,
@@ -487,10 +495,7 @@ class EndpointControllerIntegrationTest {
             jdbcTemplate,
             mapper,
             url -> {
-              assertThat(
-                      org.springframework.transaction.support.TransactionSynchronizationManager
-                          .isActualTransactionActive())
-                  .isFalse();
+              assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
               calls.incrementAndGet();
             },
             transactions);
@@ -532,7 +537,7 @@ class EndpointControllerIntegrationTest {
     try {
       assertThatThrownBy(
               () -> endpointService.rotateSigningSecret(created.endpoint().id(), projectId))
-          .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+          .isInstanceOf(DataIntegrityViolationException.class);
       assertThat(endpointService.getSigningSecret(created.endpoint().id(), projectId))
           .isEqualTo(created.signingSecret());
       assertThat(

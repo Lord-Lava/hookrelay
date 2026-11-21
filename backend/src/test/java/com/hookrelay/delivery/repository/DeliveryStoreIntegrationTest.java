@@ -10,11 +10,15 @@ import com.hookrelay.delivery.domain.DeliveryStatus;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
@@ -218,10 +222,10 @@ class DeliveryStoreIntegrationTest {
   void onlyOneConcurrentClaimAndStartSucceeds() throws Exception {
     UUID id = create().id();
     var claims = race(() -> deliveries.claim(project, id, "test", Duration.ofSeconds(60)));
-    assertThat(claims.stream().filter(java.util.Optional::isPresent).count()).isEqualTo(1);
+    assertThat(claims.stream().filter(Optional::isPresent).count()).isEqualTo(1);
     var d = deliveries.find(project, id).orElseThrow();
     var starts = race(() -> deliveries.startAttempt(project, id, d.leaseToken()));
-    assertThat(starts.stream().filter(java.util.Optional::isPresent).count()).isEqualTo(1);
+    assertThat(starts.stream().filter(Optional::isPresent).count()).isEqualTo(1);
     assertThat(deliveries.find(project, id).orElseThrow().attemptCount()).isEqualTo(1);
   }
 
@@ -423,7 +427,7 @@ class DeliveryStoreIntegrationTest {
         project, event, List.of(endpoint), body, new DeliveryPolicy("v1", 2, Duration.ofHours(1)));
     Delivery d = claim(deliveries.list(project, 100, 0).getFirst().id());
     var first = deliveries.startAttempt(project, d.id(), d.leaseToken()).orElseThrow();
-    Instant due = Instant.now().plusSeconds(60).truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+    Instant due = Instant.now().plusSeconds(60).truncatedTo(ChronoUnit.MICROS);
     assertThat(
             deliveries.finishAttempt(
                 project,
@@ -438,8 +442,7 @@ class DeliveryStoreIntegrationTest {
         .isTrue();
     var scheduled = deliveries.find(project, d.id()).orElseThrow();
     assertThat(scheduled.status()).isEqualTo(DeliveryStatus.RETRY_SCHEDULED);
-    assertThat(scheduled.nextAttemptAt())
-        .isEqualTo(due.truncatedTo(java.time.temporal.ChronoUnit.MICROS));
+    assertThat(scheduled.nextAttemptAt()).isEqualTo(due.truncatedTo(ChronoUnit.MICROS));
     assertThat(deliveries.claim(project, d.id(), "too-early", Duration.ofSeconds(60))).isEmpty();
     jdbc.update(
         "UPDATE deliveries SET next_attempt_at=clock_timestamp() WHERE project_id=? AND id=?",
@@ -620,7 +623,7 @@ class DeliveryStoreIntegrationTest {
   private static <T> List<T> race(Callable<T> operation) throws Exception {
     CountDownLatch start = new CountDownLatch(1);
     try (var executor = Executors.newFixedThreadPool(4)) {
-      var futures = new java.util.ArrayList<java.util.concurrent.Future<T>>();
+      var futures = new ArrayList<Future<T>>();
       for (int i = 0; i < 4; i++)
         futures.add(
             executor.submit(() -> {
@@ -628,7 +631,7 @@ class DeliveryStoreIntegrationTest {
               return operation.call();
             }));
       start.countDown();
-      var result = new java.util.ArrayList<T>();
+      var result = new ArrayList<T>();
       for (var future : futures) result.add(future.get(20, TimeUnit.SECONDS));
       return result;
     }

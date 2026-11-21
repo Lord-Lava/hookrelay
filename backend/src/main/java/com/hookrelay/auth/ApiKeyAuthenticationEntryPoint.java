@@ -5,6 +5,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
+import java.util.Map;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
@@ -27,7 +28,7 @@ public class ApiKeyAuthenticationEntryPoint implements AuthenticationEntryPoint 
     response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
     objectMapper.writeValue(
         response.getOutputStream(),
-        java.util.Map.of(
+        Map.of(
             "type",
             URI.create("about:blank").toString(),
             "title",

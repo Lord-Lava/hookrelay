@@ -2,9 +2,11 @@ package com.hookrelay.common;
 
 import com.hookrelay.auth.AuthenticationRequiredException;
 import com.hookrelay.endpoint.application.EndpointAlreadyExistsException;
+import com.hookrelay.endpoint.application.EndpointCapacityException;
 import com.hookrelay.endpoint.application.EndpointNotFoundException;
 import com.hookrelay.endpoint.application.SubscriptionNotFoundException;
 import com.hookrelay.event.application.IdempotencyConflictException;
+import com.hookrelay.security.SigningUnavailableException;
 import java.net.URI;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -53,10 +55,7 @@ public class ApiExceptionHandler {
         .body(problem(HttpStatus.NOT_FOUND, exception.getMessage()));
   }
 
-  @ExceptionHandler({
-    EndpointAlreadyExistsException.class,
-    com.hookrelay.endpoint.application.EndpointCapacityException.class
-  })
+  @ExceptionHandler({EndpointAlreadyExistsException.class, EndpointCapacityException.class})
   public ResponseEntity<ProblemDetail> handleEndpointAlreadyExists(RuntimeException exception) {
     return ResponseEntity.status(HttpStatus.CONFLICT)
         .body(problem(HttpStatus.CONFLICT, exception.getMessage()));
@@ -82,7 +81,7 @@ public class ApiExceptionHandler {
         .body(problem(HttpStatus.BAD_REQUEST, exception.getMessage()));
   }
 
-  @ExceptionHandler(com.hookrelay.security.SigningUnavailableException.class)
+  @ExceptionHandler(SigningUnavailableException.class)
   public ResponseEntity<ProblemDetail> handleSigningUnavailable() {
     return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
         .body(
