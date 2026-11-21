@@ -122,7 +122,7 @@ public class OutboxPublisher {
   }
 
   private long retryDelaySeconds(int attempts) {
-    int exponent = Math.min(Math.max(attempts - 1, 0), 10);
+    int exponent = Math.clamp(attempts - 1, 0, 10);
     long base = Math.min(maxBackoffSeconds, 1L << exponent);
     long jitter = Math.max(0, Math.round(base * 0.2));
     return Math.min(
