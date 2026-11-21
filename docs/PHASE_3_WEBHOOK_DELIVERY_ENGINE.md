@@ -7,12 +7,13 @@ prompt and Definition of Done. The completed Step 0 architecture is preserved in
 [Architecture reference](#architecture-reference) below, reconciled against `1e22357`
 on 2026-11-18 and integrated into these prompts on 2026-11-19.
 
-Step 0 is complete as a design exercise. Steps 1–4 are implemented; Steps 5–10 remain
-implementation work. Fan-out is disabled by default pending deployment-specific review.
+Step 0 is complete as a design exercise. Steps 1–5 are implemented; Steps 6–10 remain
+implementation work. Fan-out and delivery are disabled by default pending deployment-specific review.
 See [Step 1 verification](PHASE_3_STEP_1_VERIFICATION.md),
 [Step 2 rollout and verification](PHASE_3_STEP_2_VERIFICATION.md),
-[Step 3 transport verification](PHASE_3_STEP_3_VERIFICATION.md) and
-[Step 4 signing verification](PHASE_3_STEP_4_VERIFICATION.md).
+[Step 3 transport verification](PHASE_3_STEP_3_VERIFICATION.md),
+[Step 4 signing verification](PHASE_3_STEP_4_VERIFICATION.md) and
+[Step 5 dispatcher verification](PHASE_3_STEP_5_VERIFICATION.md).
 Use the numbered prompts as the implementation sequence and the reference as their
 shared technical contract. Read the reference before executing a prompt; the prompt
 links identify the sections most relevant to that step. Preserve both parts when
