@@ -1,5 +1,6 @@
 package com.hookrelay.delivery.repository;
 
+import com.hookrelay.delivery.application.RetryScheduler;
 import com.hookrelay.delivery.domain.AttemptOutcome;
 import com.hookrelay.delivery.domain.Delivery;
 import com.hookrelay.delivery.domain.DeliveryAttempt;
@@ -26,10 +27,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 public class DeliveryStore {
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
+  private final RetryScheduler retryScheduler;
 
-  public DeliveryStore(JdbcTemplate jdbc, TransactionTemplate transactions) {
+  public DeliveryStore(
+      JdbcTemplate jdbc, TransactionTemplate transactions, RetryScheduler retryScheduler) {
     this.jdbc = jdbc;
     this.transactions = transactions;
+    this.retryScheduler = retryScheduler;
   }
 
   public Optional<Delivery> find(UUID projectId, UUID id) {
@@ -53,6 +57,78 @@ public class DeliveryStore {
         projectId,
         limit,
         offset);
+  }
+
+  /**
+   * Lists due deliveries ready for claiming: PENDING or RETRY_SCHEDULED with next_attempt_at at or
+   * before now, within cycle deadline, and below max attempts. Ordered by next_attempt_at then
+   * created_at for fairness. Callers should claim each with {@link #claim(UUID, UUID, String,
+   * java.time.Duration)} which performs row-level locking.
+   */
+  public List<Delivery> listDue(Instant now, int limit) {
+    if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Invalid limit");
+    return jdbc.query(
+        """
+        SELECT * FROM deliveries
+        WHERE status IN ('PENDING', 'RETRY_SCHEDULED')
+          AND next_attempt_at IS NOT NULL
+          AND next_attempt_at <= ?
+          AND cycle_deadline > ?
+          AND cycle_attempt_count < max_attempts
+          AND lease_owner IS NULL
+          AND EXISTS (
+            SELECT 1 FROM endpoints e
+            WHERE e.id = deliveries.endpoint_id
+              AND e.project_id = deliveries.project_id
+              AND e.enabled AND e.deleted_at IS NULL
+          )
+        ORDER BY next_attempt_at ASC, created_at ASC, id ASC
+        LIMIT ?
+        """,
+        (rs, row) -> delivery(rs),
+        Timestamp.from(now),
+        Timestamp.from(now),
+        limit);
+  }
+
+  /**
+   * Lists in-progress deliveries with expired leases for recovery. Callers should reclaim each with
+   * {@link #recoverExpired(UUID, UUID, UUID, java.time.Instant)}.
+   */
+  public List<Delivery> listExpiredLeases(Instant now, int limit) {
+    if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Invalid limit");
+    return jdbc.query(
+        """
+        SELECT * FROM deliveries
+        WHERE status = 'IN_PROGRESS'
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at <= ?
+        ORDER BY lease_expires_at ASC, created_at ASC, id ASC
+        LIMIT ?
+        """,
+        (rs, row) -> delivery(rs),
+        Timestamp.from(now),
+        limit);
+  }
+
+  /**
+   * Lists expired deliveries whose cycle deadline has passed but are still pending or
+   * retry-scheduled. Callers should expire them via {@link #expireHorizon(UUID, UUID)}.
+   */
+  public List<Delivery> listExpiredDeliveries(Instant now, int limit) {
+    if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Invalid limit");
+    return jdbc.query(
+        """
+        SELECT * FROM deliveries
+        WHERE status IN ('PENDING', 'RETRY_SCHEDULED')
+          AND cycle_deadline IS NOT NULL
+          AND cycle_deadline <= ?
+        ORDER BY cycle_deadline ASC, created_at ASC, id ASC
+        LIMIT ?
+        """,
+        (rs, row) -> delivery(rs),
+        Timestamp.from(now),
+        limit);
   }
 
   public List<DeliveryAttempt> attempts(UUID projectId, UUID id, int limit, long offset) {
@@ -240,7 +316,7 @@ public class DeliveryStore {
   /**
    * Expires only the exact old claim. Recovery scheduling/classification is supplied by later code.
    */
-  public boolean recoverExpired(UUID projectId, UUID id, UUID token, Instant retryAt) {
+  public boolean recoverExpired(UUID projectId, UUID id, UUID token) {
     return transactions.execute(tx -> {
       var locked = lock(projectId, id);
       if (locked.isEmpty()) return false;
@@ -259,6 +335,7 @@ public class DeliveryStore {
           projectId,
           id,
           token);
+      Instant retryAt = retryScheduler.nextAttemptAt(d.cycleAttemptCount() + 1, null, now);
       DeliveryStatus target = retryTarget(d, retryAt, now);
       transition(
           d,

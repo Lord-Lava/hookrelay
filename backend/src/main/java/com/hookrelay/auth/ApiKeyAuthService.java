@@ -8,10 +8,12 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 @Service
+@Slf4j
 public class ApiKeyAuthService {
   private static final Pattern KEY_PATTERN =
       Pattern.compile("^hr_live_([A-Za-z0-9]{4,16})_([A-Za-z0-9_-]{16,200})$");
@@ -24,11 +26,13 @@ public class ApiKeyAuthService {
 
   public Optional<ProjectIdentity> authenticate(String rawKey) {
     if (rawKey == null || rawKey.length() > 256) {
+      log.debug("Auth failed: null or too long key");
       return Optional.empty();
     }
 
     Matcher matcher = KEY_PATTERN.matcher(rawKey);
     if (!matcher.matches()) {
+      log.debug("Auth failed: key pattern mismatch");
       return Optional.empty();
     }
 
@@ -56,6 +60,7 @@ public class ApiKeyAuthService {
             prefix);
 
     if (keyRecord.isEmpty()) {
+      log.debug("Auth failed: key not found in database");
       return Optional.empty();
     }
 
@@ -66,6 +71,7 @@ public class ApiKeyAuthService {
             record.keyHash().getBytes(StandardCharsets.US_ASCII),
             providedHash.getBytes(StandardCharsets.US_ASCII));
     if (!matches) {
+      log.debug("Auth failed: hash mismatch");
       return Optional.empty();
     }
 
@@ -75,7 +81,10 @@ public class ApiKeyAuthService {
             "UPDATE api_keys SET last_used_at = now() WHERE id = ? AND project_id = ? AND revoked_at IS NULL",
             record.id(),
             record.identity().projectId());
-    if (updated == 0) return Optional.empty();
+    if (updated == 0) {
+      log.warn("Failed to update last_used_at for api key {}", record.id());
+      return Optional.empty();
+    }
     return Optional.of(record.identity());
   }
 
