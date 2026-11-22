@@ -10,10 +10,14 @@ import com.hookrelay.delivery.signing.WebhookSigner;
 import com.hookrelay.delivery.transport.TransportResult;
 import com.hookrelay.delivery.transport.WebhookTransport;
 import com.hookrelay.endpoint.application.EndpointService;
+import com.hookrelay.security.ssrf.SsrfValidationException;
+import java.io.IOException;
+import java.net.UnknownHostException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
+import javax.net.ssl.SSLException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -96,29 +100,20 @@ public class DeliveryWorker {
     }
 
     TransportResult result;
+    final Instant transportStartedAt = Instant.now();
     try {
       result = transport.send(delivery.destinationUrl(), bodyBytes, headers);
     } catch (Exception e) {
-      long durationMs = Duration.between(Instant.now(), Instant.now()).toMillis();
-      result =
-          new TransportResult(
-              0,
-              null,
-              Instant.now(),
-              AttemptOutcome.RETRYABLE_FAILURE,
-              durationMs,
-              "TRANSPORT_FAILURE",
-              null);
+      long durationMs = Duration.between(transportStartedAt, Instant.now()).toMillis();
+      result = classifyTransportFailure(e, transportStartedAt, durationMs);
     }
 
     Instant retryAt = result.retryAt();
     Instant now2 = Instant.now();
     if (retryAt != null && result.outcome() == AttemptOutcome.RETRYABLE_FAILURE) {
-      long delaySeconds = Duration.between(now2, retryAt).getSeconds();
-      if (delaySeconds < 0) {
-        delaySeconds = 0;
-      }
-      retryAt = retryScheduler.nextAttemptAt(attempt.attemptNumber(), (int) delaySeconds, now2);
+      long delaySeconds = Math.max(0L, Duration.between(now2, retryAt).getSeconds());
+      int retryAfterHint = (int) Math.min(delaySeconds, Integer.MAX_VALUE);
+      retryAt = retryScheduler.nextAttemptAt(attempt.attemptNumber(), retryAfterHint, now2);
     } else if (result.outcome() == AttemptOutcome.RETRYABLE_FAILURE) {
       retryAt = retryScheduler.nextAttemptAt(attempt.attemptNumber(), null, now2);
     }
@@ -139,5 +134,54 @@ public class DeliveryWorker {
               finalRetryAt);
       return finalized ? deliveryStore.find(projectId, deliveryId).orElse(null).status() : null;
     });
+  }
+
+  /**
+   * Classifies a transport-level failure into a retryable or permanent outcome. SSRF policy
+   * violations, DNS resolution failures and TLS failures are permanent security/configuration
+   * failures that must not be retried; only transient I/O/connection failures are retryable.
+   */
+  private static TransportResult classifyTransportFailure(
+      Exception e, Instant startedAt, long durationMs) {
+    Throwable cause = e;
+    while (cause != null) {
+      if (cause instanceof SsrfValidationException) {
+        return new TransportResult(
+            0,
+            null,
+            startedAt,
+            AttemptOutcome.PERMANENT_FAILURE,
+            durationMs,
+            "SSRF_REJECTED",
+            null);
+      }
+      if (cause instanceof SSLException) {
+        return new TransportResult(
+            0, null, startedAt, AttemptOutcome.PERMANENT_FAILURE, durationMs, "TLS_FAILURE", null);
+      }
+      if (cause instanceof UnknownHostException) {
+        return new TransportResult(
+            0, null, startedAt, AttemptOutcome.PERMANENT_FAILURE, durationMs, "DNS_FAILURE", null);
+      }
+      cause = cause.getCause();
+    }
+    if (e instanceof IOException) {
+      return new TransportResult(
+          0,
+          null,
+          startedAt,
+          AttemptOutcome.RETRYABLE_FAILURE,
+          durationMs,
+          "TRANSPORT_FAILURE",
+          null);
+    }
+    return new TransportResult(
+        0,
+        null,
+        startedAt,
+        AttemptOutcome.RETRYABLE_FAILURE,
+        durationMs,
+        "TRANSPORT_FAILURE",
+        null);
   }
 }

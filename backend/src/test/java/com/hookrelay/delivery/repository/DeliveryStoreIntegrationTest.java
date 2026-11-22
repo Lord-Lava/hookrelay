@@ -9,6 +9,7 @@ import com.hookrelay.delivery.domain.Delivery;
 import com.hookrelay.delivery.domain.DeliveryPolicy;
 import com.hookrelay.delivery.domain.DeliveryStatus;
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -614,6 +615,205 @@ class DeliveryStoreIntegrationTest {
     } finally {
       jdbc.execute("DROP SCHEMA " + legacy + " CASCADE");
     }
+  }
+
+  @Test
+  void retryHorizonExceededDeadLettersWithoutAttempt() {
+    Delivery d = create();
+    Instant now = Instant.now();
+    tx.executeWithoutResult(status -> {
+      jdbc.update(
+          """
+          UPDATE deliveries SET status='RETRY_SCHEDULED', next_attempt_at=?, cycle_deadline=?,
+            cycle_started_at=?
+          WHERE project_id=? AND id=?
+          """,
+          Timestamp.from(now.minusSeconds(120)),
+          Timestamp.from(now.minusSeconds(60)),
+          Timestamp.from(now.minusSeconds(300)),
+          project,
+          d.id());
+      jdbc.update(
+          """
+          UPDATE delivery_cycles SET started_at=?, deadline=? WHERE project_id=? AND delivery_id=? AND cycle_number=0
+          """,
+          Timestamp.from(now.minusSeconds(300)),
+          Timestamp.from(now.minusSeconds(60)),
+          project,
+          d.id());
+    });
+    assertThat(deliveries.expireHorizon(project, d.id())).isTrue();
+    assertThat(deliveries.find(project, d.id()).orElseThrow().status())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(deliveries.attempts(project, d.id(), 100, 0)).isEmpty();
+    assertThat(deliveries.cycles(project, d.id(), 100, 0).getFirst().terminalStatus())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(deliveries.expireHorizon(project, d.id())).isFalse();
+  }
+
+  @Test
+  void deadLetteredStatePreservesDiagnosticInfoAndAttemptHistory() {
+    Delivery d = create();
+    Delivery claimed = claim(d.id());
+    var first = deliveries.startAttempt(project, d.id(), claimed.leaseToken()).orElseThrow();
+    Instant due = Instant.now().plusSeconds(60);
+    assertThat(
+            deliveries.finishAttempt(
+                project,
+                d.id(),
+                claimed.leaseToken(),
+                first.id(),
+                AttemptOutcome.PERMANENT_FAILURE,
+                400,
+                10,
+                "HTTP_4XX",
+                null))
+        .isTrue();
+    var dead = deliveries.find(project, d.id()).orElseThrow();
+    assertThat(dead.status()).isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(dead.lastErrorCode()).isEqualTo("HTTP_4XX");
+    assertThat(dead.terminalAt()).isNotNull();
+    assertThat(dead.nextAttemptAt()).isNull();
+    assertThat(dead.leaseToken()).isNull();
+
+    var attempts = deliveries.attempts(project, d.id(), 100, 0);
+    assertThat(attempts).hasSize(1);
+    assertThat(attempts.getFirst().outcome()).isEqualTo(AttemptOutcome.PERMANENT_FAILURE);
+    assertThat(attempts.getFirst().httpStatus()).isEqualTo(400);
+    assertThat(attempts.getFirst().errorCode()).isEqualTo("HTTP_4XX");
+    assertThat(attempts.getFirst().durationMs()).isEqualTo(10L);
+
+    assertThat(
+            deliveries.finishAttempt(
+                project,
+                d.id(),
+                claimed.leaseToken(),
+                first.id(),
+                AttemptOutcome.PERMANENT_FAILURE,
+                400,
+                10,
+                "HTTP_4XX",
+                null))
+        .isFalse();
+    assertThat(deliveries.find(project, d.id()).orElseThrow().status())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(deliveries.attempts(project, d.id(), 100, 0)).hasSize(1);
+  }
+
+  @Test
+  void retryableFailureReschedulesAndRestartRecoveryResumes() {
+    Delivery d = create();
+    Delivery claimed = claim(d.id());
+    var first = deliveries.startAttempt(project, d.id(), claimed.leaseToken()).orElseThrow();
+    Instant due = Instant.now().plusSeconds(60);
+    assertThat(
+            deliveries.finishAttempt(
+                project,
+                d.id(),
+                claimed.leaseToken(),
+                first.id(),
+                AttemptOutcome.RETRYABLE_FAILURE,
+                503,
+                10,
+                "HTTP_5XX",
+                due))
+        .isTrue();
+    var scheduled = deliveries.find(project, d.id()).orElseThrow();
+    assertThat(scheduled.status()).isEqualTo(DeliveryStatus.RETRY_SCHEDULED);
+    assertThat(scheduled.nextAttemptAt().truncatedTo(java.time.temporal.ChronoUnit.MILLIS))
+        .isEqualTo(due.truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
+    assertThat(deliveries.claim(project, d.id(), "too-early", Duration.ofSeconds(60))).isEmpty();
+
+    jdbc.update(
+        "UPDATE deliveries SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE project_id=? AND id=?",
+        project,
+        d.id());
+    DeliveryStore restarted = new DeliveryStore(jdbc, tx, retryScheduler);
+    Delivery reclaimed =
+        restarted.claim(project, d.id(), "restarted-worker", Duration.ofSeconds(60)).orElseThrow();
+    assertThat(reclaimed.leaseToken()).isNotEqualTo(claimed.leaseToken());
+    assertThat(reclaimed.status()).isEqualTo(DeliveryStatus.IN_PROGRESS);
+    assertThat(reclaimed.nextAttemptAt()).isNull();
+  }
+
+  @Test
+  void multipleAttemptsPreserveFullHistory() {
+    Delivery d = create();
+    jdbc.update(
+        "UPDATE deliveries SET max_attempts=3 WHERE project_id=? AND id=?", project, d.id());
+    jdbc.update(
+        "UPDATE delivery_cycles SET max_attempts=3 WHERE project_id=? AND delivery_id=? AND cycle_number=0",
+        project,
+        d.id());
+
+    Optional<Delivery> claimed =
+        deliveries.claim(project, d.id(), "test-worker", Duration.ofSeconds(60));
+    assertThat(claimed).isPresent();
+    Delivery claim1 = claimed.orElseThrow();
+    var a1 = deliveries.startAttempt(project, d.id(), claim1.leaseToken()).orElseThrow();
+    Instant t1 = Instant.now();
+    deliveries.finishAttempt(
+        project,
+        d.id(),
+        claim1.leaseToken(),
+        a1.id(),
+        AttemptOutcome.RETRYABLE_FAILURE,
+        503,
+        10,
+        "HTTP_5XX",
+        t1.plusSeconds(30));
+
+    jdbc.update(
+        "UPDATE deliveries SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE project_id=? AND id=?",
+        project,
+        d.id());
+    Optional<Delivery> claimed2 =
+        deliveries.claim(project, d.id(), "test-worker", Duration.ofSeconds(60));
+    assertThat(claimed2).isPresent();
+    Delivery claim2 = claimed2.orElseThrow();
+    var a2 = deliveries.startAttempt(project, d.id(), claim2.leaseToken()).orElseThrow();
+    deliveries.finishAttempt(
+        project,
+        d.id(),
+        claim2.leaseToken(),
+        a2.id(),
+        AttemptOutcome.RETRYABLE_FAILURE,
+        503,
+        12,
+        "HTTP_5XX",
+        Instant.now().plusSeconds(60));
+
+    jdbc.update(
+        "UPDATE deliveries SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE project_id=? AND id=?",
+        project,
+        d.id());
+    Optional<Delivery> claimed3 =
+        deliveries.claim(project, d.id(), "test-worker", Duration.ofSeconds(60));
+    assertThat(claimed3).isPresent();
+    Delivery claim3 = claimed3.orElseThrow();
+    var a3 = deliveries.startAttempt(project, d.id(), claim3.leaseToken()).orElseThrow();
+    deliveries.finishAttempt(
+        project,
+        d.id(),
+        claim3.leaseToken(),
+        a3.id(),
+        AttemptOutcome.PERMANENT_FAILURE,
+        503,
+        8,
+        "HTTP_5XX",
+        null);
+
+    var attempts = deliveries.attempts(project, d.id(), 100, 0);
+    assertThat(attempts).hasSize(3);
+    assertThat(attempts.get(0).attemptNumber()).isEqualTo(1);
+    assertThat(attempts.get(0).outcome()).isEqualTo(AttemptOutcome.RETRYABLE_FAILURE);
+    assertThat(attempts.get(1).attemptNumber()).isEqualTo(2);
+    assertThat(attempts.get(2).attemptNumber()).isEqualTo(3);
+    assertThat(attempts.get(2).outcome()).isEqualTo(AttemptOutcome.PERMANENT_FAILURE);
+    assertThat(deliveries.find(project, d.id()).orElseThrow().status())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(deliveries.cycles(project, d.id(), 100, 0).getFirst().terminalStatus())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
   }
 
   private static <T> List<T> race(Callable<T> operation) throws Exception {

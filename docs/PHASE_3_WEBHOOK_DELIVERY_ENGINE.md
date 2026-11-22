@@ -533,21 +533,34 @@ Persist STARTED before transport; finalize it afterward. Never hold a database t
 ### Goal
 
 Automatically recover from temporary endpoint failures and preserve permanently failed deliveries.
+**Status: COMPLETE** — implemented in `com.hookrelay.delivery.application.DeliveryWorker`, `RetryScheduler`, `DeliveryStore`, and verified by unit + PostgreSQL integration tests.
 
 ### Selected default policy
 
-| Result                             | Behaviour                       |
-|------------------------------------|---------------------------------|
-| HTTP 2xx                           | Success                         |
-| HTTP 408                           | Retry                           |
-| HTTP 429                           | Retry; consider `Retry-After`   |
-| HTTP 5xx                           | Retry                           |
-| Connection timeout/network failure | Retry                           |
-| Most other HTTP 4xx                | Permanent failure               |
-| HTTP 3xx                           | Do not follow; treat as failure |
-| Max attempts exhausted             | Dead-letter                     |
+| Result                             | Behaviour                                    |
+|------------------------------------|----------------------------------------------|
+| HTTP 2xx                           | Success (`DELIVERED`)                        |
+| HTTP 408                           | Retry                                        |
+| HTTP 429                           | Retry; bounded `Retry-After` honored         |
+| HTTP 5xx                           | Retry                                        |
+| Connection timeout/network failure | Retry                                        |
+| SSRF policy violation              | Permanent failure (`SSRF_REJECTED`)          |
+| DNS resolution failure             | Permanent failure (`DNS_FAILURE`)            |
+| TLS/hostname failure               | Permanent failure (`TLS_FAILURE`)            |
+| Most other HTTP 4xx                | Permanent failure                            |
+| HTTP 3xx                           | Do not follow; treat as permanent failure    |
+| Max attempts exhausted             | Dead-letter (`DEAD_LETTERED`)                |
+| Retry horizon exceeded             | Dead-letter (`DEAD_LETTERED`)                |
 
 Use the selected 8-attempt/24-hour cycle budget, equal jitter with a 10-second base and one-hour cap, bounded Retry-After, and the full outcome classification in the reference. Persist each cycle's policy version/limits; configuration must not silently expand existing budgets.
+
+### Implementation notes
+
+- `RetryScheduler` computes exponential backoff with equal jitter (`[cap/2, cap]`), clamps Retry-After to `maxSeconds`, combines via `max(jittered, retryAfter)`, and is overflow-safe for large attempt numbers. The jitter source is injectable for deterministic tests.
+- `DeliveryWorker` classifies transport-level failures: SSRF/DNS/TLS are permanent (not retried); only `IOException`/connection failures are retryable. Transport duration is measured correctly (previously always zero). Retry-After hints are clamped before the `(int)` cast to avoid overflow.
+- `DeliveryStore` persists `next_attempt_at`, `last_error_code`, `terminal_at`, and attempt history atomically. Dead-lettered deliveries (`DEAD_LETTERED`) are excluded from `listDue` and `claim`, never automatically retried, and are idempotent under concurrent terminalization.
+- Crash/restart recovery uses `recoverExpired` (fenced lease expiry) and `expireHorizon` (cycle deadline exceeded → `DEAD_LETTERED`).
+- Customer-visible DLQ = PostgreSQL rows in `DEAD_LETTERED` plus attempt/cycle history, independent of RabbitMQ's broker-level DLQ.
 
 ### Coding-agent prompt
 
@@ -556,8 +569,6 @@ Use the selected 8-attempt/24-hour cycle budget, equal jitter with a 10-second b
 > Read and follow [bounded retry policy and outcome classification](#7-decision-https-transport-and-retry-policy) in this document alongside AGENTS.md. Preserve the step prompts and reconcile any repository drift explicitly.
 >
 > Read the delivery state machine, worker implementation and current configuration.
->
-> Implement a deterministic retry-policy component that classifies outcomes and calculates `next_attempt_at`.
 >
 > Requirements:
 >
