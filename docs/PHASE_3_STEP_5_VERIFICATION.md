@@ -17,7 +17,7 @@ HTTPS transport). Key components:
 | `DeliveryWorker` | Starts attempt, signs body via HMAC-SHA256, sends via SSRF-safe HTTPS transport, finalizes attempt result |
 | `DispatchControlService` | In-memory project/endpoint concurrency and rate-limit admission |
 | `RetryScheduler` | Exponential backoff with equal jitter, bounded Retry-After honoring, cycle deadline enforcement |
-| `DeliveryDispatcherProperties` | Configurable timeouts, concurrency, rate limits, retry parameters |
+| `DeliveryDispatcherProperties` | Configurable timeouts, concurrency and rate limits |
 | `DeliveryDispatcherConfiguration` | Spring configuration (conditional on `hookrelay.delivery.dispatcher.enabled=true`) |
 
 Modified:
@@ -47,9 +47,6 @@ Modified:
 | `hookrelay.delivery.dispatcher.max-concurrent-per-endpoint` | `1` | Max concurrent deliveries per endpoint |
 | `hookrelay.delivery.dispatcher.rate-per-project-per-second` | `20` | Max delivery starts per project per second |
 | `hookrelay.delivery.dispatcher.rate-per-endpoint-per-second` | `5` | Max delivery starts per endpoint per second |
-| `hookrelay.delivery.dispatcher.retry-base-seconds` | `10` | Base exponential backoff in seconds |
-| `hookrelay.delivery.dispatcher.retry-max-seconds` | `3600` | Max backoff cap in seconds |
-| `hookrelay.delivery.dispatcher.cycle-deadline` | `24h` | Maximum retry cycle duration |
 
 ## Verification evidence
 

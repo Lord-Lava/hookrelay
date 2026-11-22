@@ -2,15 +2,23 @@ package com.hookrelay.delivery.transport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.hookrelay.security.ssrf.DnsResolver;
 import com.hookrelay.security.ssrf.SsrfUrlValidator;
 import com.hookrelay.security.ssrf.SsrfValidationException;
+import java.io.EOFException;
+import java.net.InetAddress;
 import java.time.Duration;
 import java.util.UUID;
+import javax.net.ssl.SSLHandshakeException;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.protocol.HttpClientContext;
+import org.apache.hc.core5.http.ClassicHttpRequest;
+import org.apache.hc.core5.http.HttpHost;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -85,6 +93,29 @@ class SsrfSafeWebhookTransportTest {
     assertThatThrownBy(() -> transport.send("https://evil.com/hook#fragment", new byte[0]))
         .isInstanceOf(TransportException.class)
         .hasMessageContaining("URL fragments are not allowed");
+  }
+
+  @Test
+  void givenPeerEofDuringTlsUpgrade_whenSend_thenTransportMarksFailureRetryable() throws Exception {
+    String url = "https://customer.example/hook";
+    when(dnsResolver.resolve("customer.example"))
+        .thenReturn(new InetAddress[] {InetAddress.ofLiteral("8.8.8.8")});
+    var handshakeFailure = new SSLHandshakeException("Remote host terminated the handshake");
+    handshakeFailure.initCause(new EOFException());
+    var upgradeFailure = new IllegalStateException("TLS upgrade failed", handshakeFailure);
+    when(httpClient.execute(
+            any(HttpHost.class), any(ClassicHttpRequest.class), any(HttpClientContext.class)))
+        .thenThrow(upgradeFailure);
+    var transport = new SsrfSafeWebhookTransport(httpClient, urlValidator, dnsResolver, properties);
+
+    assertThatThrownBy(() -> transport.send(url, new byte[0]))
+        .isInstanceOfSatisfying(
+            TransportException.class,
+            failure -> {
+              assertThat(failure.isPermanent()).isFalse();
+              assertThat(failure.failureCategory()).isEqualTo("TRANSPORT_FAILURE");
+              assertThat(failure.getCause()).isSameAs(upgradeFailure);
+            });
   }
 
   @Test

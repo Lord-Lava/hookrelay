@@ -67,7 +67,7 @@ public class DefaultSsrfUrlValidator implements SsrfUrlValidator {
     try {
       addresses = resolver.resolve(host);
     } catch (UnknownHostException exception) {
-      throw new SsrfValidationException("Unable to resolve endpoint hostname");
+      throw new SsrfValidationException("Unable to resolve endpoint hostname", exception);
     }
     if (addresses == null || addresses.length == 0) {
       throw new SsrfValidationException("Unable to resolve endpoint hostname");

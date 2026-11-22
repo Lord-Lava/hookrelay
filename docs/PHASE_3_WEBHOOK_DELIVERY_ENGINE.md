@@ -545,8 +545,10 @@ Automatically recover from temporary endpoint failures and preserve permanently 
 | HTTP 5xx                           | Retry                                        |
 | Connection timeout/network failure | Retry                                        |
 | SSRF policy violation              | Permanent failure (`SSRF_REJECTED`)          |
-| DNS resolution failure             | Permanent failure (`DNS_FAILURE`)            |
-| TLS/hostname failure               | Permanent failure (`TLS_FAILURE`)            |
+| DNS lookup timeout                 | Retry (`DNS_TIMEOUT`)                        |
+| Permanent DNS resolution failure   | Permanent failure (`DNS_FAILURE`)           |
+| Peer EOF during TLS handshake      | Retry (`TRANSPORT_FAILURE`)                  |
+| Other TLS failure (including trust or hostname) | Permanent failure (`TLS_FAILURE`) |
 | Most other HTTP 4xx                | Permanent failure                            |
 | HTTP 3xx                           | Do not follow; treat as permanent failure    |
 | Max attempts exhausted             | Dead-letter (`DEAD_LETTERED`)                |
@@ -557,7 +559,7 @@ Use the selected 8-attempt/24-hour cycle budget, equal jitter with a 10-second b
 ### Implementation notes
 
 - `RetryScheduler` computes exponential backoff with equal jitter (`[cap/2, cap]`), clamps Retry-After to `maxSeconds`, combines via `max(jittered, retryAfter)`, and is overflow-safe for large attempt numbers. The jitter source is injectable for deterministic tests.
-- `DeliveryWorker` classifies transport-level failures: SSRF/DNS/TLS are permanent (not retried); only `IOException`/connection failures are retryable. Transport duration is measured correctly (previously always zero). Retry-After hints are clamped before the `(int)` cast to avoid overflow.
+- `DeliveryWorker` retries temporary DNS lookup timeouts and peer EOF during TLS handshakes. Unknown hosts, SSRF rejections, and TLS verification failures are permanent. The worker measures failed sends with a monotonic clock and clamps Retry-After hints before converting them to `int`.
 - `DeliveryStore` persists `next_attempt_at`, `last_error_code`, `terminal_at`, and attempt history atomically. Dead-lettered deliveries (`DEAD_LETTERED`) are excluded from `listDue` and `claim`, never automatically retried, and are idempotent under concurrent terminalization.
 - Crash/restart recovery uses `recoverExpired` (fenced lease expiry) and `expireHorizon` (cycle deadline exceeded → `DEAD_LETTERED`).
 - Customer-visible DLQ = PostgreSQL rows in `DEAD_LETTERED` plus attempt/cycle history, independent of RabbitMQ's broker-level DLQ.
@@ -1345,9 +1347,9 @@ known success into a retry. Responses are not application payload acknowledgemen
 |------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
 | Final 2xx                                                                                      | `DELIVERED`, including 202/204.                                                             |
 | 408, 429, 500–599                                                                              | Retry with remaining budget.                                                                |
-| Connection refused/reset, temporary DNS failure, connect/read/total timeout                    | Retry; outcome may be ambiguous.                                                            |
+| Connection refused/reset, temporary DNS failure, peer EOF during TLS handshake, connect/read/total timeout                    | Retry; outcome may be ambiguous.                                                            |
 | Other 4xx; all 3xx                                                                             | Permanent failure; never follow Location.                                                   |
-| TLS trust/hostname failure, prohibited address/scheme/port, invalid endpoint secret ciphertext | Permanent security/configuration failure; no unsafe fallback.                               |
+| Permanent DNS resolution failure, TLS trust/hostname failure, prohibited address/scheme/port, invalid endpoint secret ciphertext | Permanent security/configuration failure; no unsafe fallback.                               |
 | Response protocol/header limit failure before a final status                                   | Permanent `INVALID_RESPONSE`; no unbounded parsing.                                         |
 | Missing active/decryption key or exhausted local DNS/worker resources                          | Pre-send infrastructure deferral, alert; no attempt consumed, cycle horizon still enforced. |
 | Invalid/unknown outcome                                                                        | Fail closed with explicit classified reason; no default success.                            |

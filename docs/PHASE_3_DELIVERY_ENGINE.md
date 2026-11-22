@@ -55,16 +55,18 @@ transport-level exceptions. The combined policy:
 | HTTP 5xx                           | Retry                                        |
 | Connection timeout / network IO    | Retry                                        |
 | SSRF policy violation              | Permanent (`SSRF_REJECTED`) — not retried    |
-| DNS resolution failure             | Permanent (`DNS_FAILURE`) — not retried      |
-| TLS / hostname failure             | Permanent (`TLS_FAILURE`) — not retried      |
+| DNS lookup timeout                 | Retry (`DNS_TIMEOUT`)                        |
+| Permanent DNS resolution failure   | Permanent (`DNS_FAILURE`)                   |
+| Peer EOF during TLS handshake      | Retry (`TRANSPORT_FAILURE`)                  |
+| Other TLS failure (including trust or hostname) | Permanent (`TLS_FAILURE`)        |
 | Most other HTTP 4xx                | Permanent failure                            |
 | HTTP 3xx                           | Do not follow redirects; permanent failure   |
 | Max attempts exhausted             | Dead-letter (`DEAD_LETTERED`)                |
 | Retry horizon exceeded             | Dead-letter (`DEAD_LETTERED`)                |
 
-SSRF/DNS/TLS failures are permanent security/configuration failures and must not be retried.
-Only transient I/O/connection failures are retryable. No response is accidentally treated as
-successful: only final 2xx (including 202/204) marks a delivery delivered.
+Temporary DNS failures reported as lookup timeouts are retryable. Unknown hosts, SSRF
+rejections, and TLS trust or hostname verification failures are permanent. Only a final 2xx
+response (including 202/204) marks a delivery delivered.
 
 ## 4. Exponential backoff and retry scheduling
 
@@ -76,9 +78,9 @@ successful: only final 2xx (including 202/204) marks a delivery delivered.
 - Past Retry-After dates contribute zero delay (jittered backoff used)
 - The cycle deadline caps the schedule; attempts beyond it are dead-lettered
 
-### Default configuration
+### Current retry policy values
 
-| Property                   | Default   |
+| Policy value               | Current value |
 |----------------------------|-----------|
 | Base backoff               | 10 s      |
 | Maximum backoff            | 1 h (3600 s) |
@@ -100,7 +102,8 @@ HookRelay's customer-visible DLQ is logically separate from RabbitMQ's broker-le
 exchange. It is represented by PostgreSQL rows in `DEAD_LETTERED` plus attempt/cycle history.
 
 A delivery transitions to `DEAD_LETTERED` when:
-1. A permanent failure occurs (most 4xx, SSRF/DNS/TLS, invalid destination).
+1. A permanent failure occurs (most 4xx, SSRF rejection, unknown host, TLS verification failure,
+   or invalid destination).
 2. Retry attempts are exhausted (cycle attempt count reaches `max_attempts`).
 3. The retry horizon (cycle deadline) is exceeded.
 
@@ -151,10 +154,6 @@ explicitly enabled.
 
 Key settings:
 - `hookrelay.delivery.dispatcher.enabled` — enable workers (default: false)
-- `hookrelay.delivery.dispatcher.retry-base-seconds` — base backoff (default: 10)
-- `hookrelay.delivery.dispatcher.retry-max-seconds` — maximum backoff (default: 3600)
-- `hookrelay.delivery.dispatcher.retry-max-attempts` — attempts per cycle (default: 8)
-- `hookrelay.delivery.dispatcher.retry-cycle-deadline` — cycle horizon (default: 24h)
 
 ## 9. Known limitations
 

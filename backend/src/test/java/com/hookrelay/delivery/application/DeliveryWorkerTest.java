@@ -3,9 +3,13 @@ package com.hookrelay.delivery.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.hookrelay.delivery.domain.AttemptOutcome;
@@ -16,20 +20,29 @@ import com.hookrelay.delivery.domain.FanoutSnapshot;
 import com.hookrelay.delivery.repository.DeliveryStore;
 import com.hookrelay.delivery.repository.FanoutStore;
 import com.hookrelay.delivery.signing.WebhookSigner;
+import com.hookrelay.delivery.transport.SsrfSafeWebhookTransport;
+import com.hookrelay.delivery.transport.TransportException;
 import com.hookrelay.delivery.transport.TransportResult;
 import com.hookrelay.delivery.transport.WebhookTransport;
+import com.hookrelay.delivery.transport.WebhookTransportProperties;
 import com.hookrelay.endpoint.application.EndpointService;
+import com.hookrelay.security.ssrf.DefaultSsrfUrlValidator;
+import com.hookrelay.security.ssrf.DnsResolver;
 import com.hookrelay.security.ssrf.SsrfValidationException;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.UnknownHostException;
+import java.security.cert.CertificateException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import javax.net.ssl.SSLException;
+import java.util.concurrent.TimeoutException;
+import javax.net.ssl.SSLHandshakeException;
+import javax.net.ssl.SSLPeerUnverifiedException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.PlatformTransactionManager;
 
@@ -74,8 +87,8 @@ class DeliveryWorkerTest {
         .thenReturn("v1,sig");
     when(deliveryStore.startAttempt(projectId, deliveryId, leaseToken))
         .thenReturn(Optional.of(startedAttempt()));
-    Instant retryAt = Instant.now().plusSeconds(60);
-    when(transport.send(any(String.class), any(byte[].class), any(Map.class)))
+    Instant retryAfter = Instant.now().plusSeconds(60);
+    when(transport.send(any(String.class), any(byte[].class), anyMap()))
         .thenReturn(
             new TransportResult(
                 500,
@@ -84,8 +97,9 @@ class DeliveryWorkerTest {
                 AttemptOutcome.RETRYABLE_FAILURE,
                 100L,
                 "HTTP_5XX",
-                retryAt));
-    when(retryScheduler.nextAttemptAt(eq(1), eq(60), any(Instant.class))).thenReturn(retryAt);
+                retryAfter));
+    Instant retryAt = retryAfter.plusSeconds(10);
+    when(retryScheduler.nextAttemptAt(eq(1), notNull(), any(Instant.class))).thenReturn(retryAt);
     when(deliveryStore.finishAttempt(
             any(), any(), any(), any(), any(), any(), anyLong(), any(), any()))
         .thenReturn(true);
@@ -93,7 +107,19 @@ class DeliveryWorkerTest {
     DeliveryStatus result = worker.process(projectId, deliveryId, leaseToken);
 
     assertThat(result).isEqualTo(DeliveryStatus.RETRY_SCHEDULED);
-    verify(transport).send(eq("https://8.8.8.8/hook"), any(byte[].class), any(Map.class));
+    var savedRetryAt = ArgumentCaptor.forClass(Instant.class);
+    verify(deliveryStore)
+        .finishAttempt(
+            eq(projectId),
+            eq(deliveryId),
+            eq(leaseToken),
+            eq(attemptId),
+            eq(AttemptOutcome.RETRYABLE_FAILURE),
+            eq(500),
+            eq(100L),
+            eq("HTTP_5XX"),
+            savedRetryAt.capture());
+    assertThat(savedRetryAt.getValue()).isEqualTo(retryAt);
   }
 
   @Test
@@ -108,7 +134,7 @@ class DeliveryWorkerTest {
         .thenReturn("v1,sig");
     when(deliveryStore.startAttempt(projectId, deliveryId, leaseToken))
         .thenReturn(Optional.of(startedAttempt()));
-    when(transport.send(any(String.class), any(byte[].class), any(Map.class)))
+    when(transport.send(any(String.class), any(byte[].class), anyMap()))
         .thenReturn(
             new TransportResult(
                 400,
@@ -129,132 +155,82 @@ class DeliveryWorkerTest {
 
   @Test
   void givenSsrfRejected_whenProcess_thenDeadLetteredNotRetried() throws Exception {
-    Delivery dead = Delivery.builder().status(DeliveryStatus.DEAD_LETTERED).build();
-    when(deliveryStore.find(projectId, deliveryId))
-        .thenReturn(Optional.of(pendingDelivery()))
-        .thenReturn(Optional.of(dead));
-    when(fanoutStore.find(projectId, eventId)).thenReturn(Optional.of(snapshot()));
-    when(endpointService.getSigningSecret(endpointId, projectId)).thenReturn("whsec_dGVzdA==");
-    when(signer.sign(any(UUID.class), any(Long.class), any(byte[].class), any(String.class)))
-        .thenReturn("v1,sig");
-    when(deliveryStore.startAttempt(projectId, deliveryId, leaseToken))
-        .thenReturn(Optional.of(startedAttempt()));
-    SsrfValidationException cause = new SsrfValidationException("prohibited address");
-    when(transport.send(any(String.class), any(byte[].class), any(Map.class)))
-        .thenThrow(new com.hookrelay.delivery.transport.TransportException("SSRF", cause));
-    when(deliveryStore.finishAttempt(
-            any(), any(), any(), any(), any(), any(), anyLong(), any(), any()))
-        .thenReturn(true);
+    stubAttempt(DeliveryStatus.DEAD_LETTERED);
+    stubTransportFailure(new SsrfValidationException("prohibited address"));
 
-    DeliveryStatus result = worker.process(projectId, deliveryId, leaseToken);
-
-    assertThat(result).isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertPermanentFailure("SSRF_REJECTED");
   }
 
   @Test
-  void givenTlsFailure_whenProcess_thenDeadLetteredNotRetried() throws Exception {
-    Delivery dead = Delivery.builder().status(DeliveryStatus.DEAD_LETTERED).build();
-    when(deliveryStore.find(projectId, deliveryId))
-        .thenReturn(Optional.of(pendingDelivery()))
-        .thenReturn(Optional.of(dead));
-    when(fanoutStore.find(projectId, eventId)).thenReturn(Optional.of(snapshot()));
-    when(endpointService.getSigningSecret(endpointId, projectId)).thenReturn("whsec_dGVzdA==");
-    when(signer.sign(any(UUID.class), any(Long.class), any(byte[].class), any(String.class)))
-        .thenReturn("v1,sig");
-    when(deliveryStore.startAttempt(projectId, deliveryId, leaseToken))
-        .thenReturn(Optional.of(startedAttempt()));
-    SSLException cause = new SSLException("hostname mismatch");
-    when(transport.send(any(String.class), any(byte[].class), any(Map.class)))
-        .thenThrow(new com.hookrelay.delivery.transport.TransportException("TLS", cause));
-    when(deliveryStore.finishAttempt(
-            any(), any(), any(), any(), any(), any(), anyLong(), any(), any()))
-        .thenReturn(true);
+  void givenHostnameMismatch_whenProcess_thenDeadLetteredNotRetried() throws Exception {
+    stubAttempt(DeliveryStatus.DEAD_LETTERED);
+    stubTransportFailure(new SSLPeerUnverifiedException("hostname mismatch"));
 
-    DeliveryStatus result = worker.process(projectId, deliveryId, leaseToken);
-
-    assertThat(result).isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertPermanentFailure("TLS_FAILURE");
   }
 
   @Test
-  void givenDnsFailure_whenProcess_thenDeadLetteredNotRetried() throws Exception {
-    Delivery dead = Delivery.builder().status(DeliveryStatus.DEAD_LETTERED).build();
-    when(deliveryStore.find(projectId, deliveryId))
-        .thenReturn(Optional.of(pendingDelivery()))
-        .thenReturn(Optional.of(dead));
-    when(fanoutStore.find(projectId, eventId)).thenReturn(Optional.of(snapshot()));
-    when(endpointService.getSigningSecret(endpointId, projectId)).thenReturn("whsec_dGVzdA==");
-    when(signer.sign(any(UUID.class), any(Long.class), any(byte[].class), any(String.class)))
-        .thenReturn("v1,sig");
-    when(deliveryStore.startAttempt(projectId, deliveryId, leaseToken))
-        .thenReturn(Optional.of(startedAttempt()));
-    UnknownHostException cause = new UnknownHostException("no such host");
-    when(transport.send(any(String.class), any(byte[].class), any(Map.class)))
-        .thenThrow(new com.hookrelay.delivery.transport.TransportException("DNS", cause));
-    when(deliveryStore.finishAttempt(
-            any(), any(), any(), any(), any(), any(), anyLong(), any(), any()))
-        .thenReturn(true);
+  void givenUntrustedCertificate_whenProcess_thenDeadLetteredNotRetried() throws Exception {
+    stubAttempt(DeliveryStatus.DEAD_LETTERED);
+    var failure = new SSLHandshakeException("certificate failed");
+    failure.initCause(new CertificateException("untrusted", new EOFException()));
+    stubTransportFailure(failure);
 
-    DeliveryStatus result = worker.process(projectId, deliveryId, leaseToken);
-
-    assertThat(result).isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertPermanentFailure("TLS_FAILURE");
   }
 
   @Test
-  void givenIoFailure_whenProcess_thenRetryScheduled() throws Exception {
-    Delivery scheduled = Delivery.builder().status(DeliveryStatus.RETRY_SCHEDULED).build();
-    when(deliveryStore.find(projectId, deliveryId))
-        .thenReturn(Optional.of(pendingDelivery()))
-        .thenReturn(Optional.of(scheduled));
-    when(fanoutStore.find(projectId, eventId)).thenReturn(Optional.of(snapshot()));
-    when(endpointService.getSigningSecret(endpointId, projectId)).thenReturn("whsec_dGVzdA==");
-    when(signer.sign(any(UUID.class), any(Long.class), any(byte[].class), any(String.class)))
-        .thenReturn("v1,sig");
-    when(deliveryStore.startAttempt(projectId, deliveryId, leaseToken))
-        .thenReturn(Optional.of(startedAttempt()));
-    IOException cause = new IOException("connection reset");
-    when(transport.send(any(String.class), any(byte[].class), any(Map.class)))
-        .thenThrow(new com.hookrelay.delivery.transport.TransportException("IO", cause));
-    when(retryScheduler.nextAttemptAt(eq(1), eq(null), any(Instant.class)))
-        .thenReturn(Instant.now().plusSeconds(10));
-    when(deliveryStore.finishAttempt(
-            any(), any(), any(), any(), any(), any(), anyLong(), any(), any()))
-        .thenReturn(true);
-
-    DeliveryStatus result = worker.process(projectId, deliveryId, leaseToken);
-
-    assertThat(result).isEqualTo(DeliveryStatus.RETRY_SCHEDULED);
+  void givenUnknownHost_whenProcess_thenDeadLetteredNotRetried() throws Exception {
+    stubAttempt(DeliveryStatus.DEAD_LETTERED, "https://customer.example/hook");
+    var actualTransport = stubDnsFailure(new UnknownHostException("no such host"));
+    try {
+      assertPermanentFailure("DNS_FAILURE");
+    } finally {
+      actualTransport.destroy();
+    }
   }
 
   @Test
-  void givenDurationRecorded_whenTransportSends_thenNonZeroDuration() throws Exception {
-    when(deliveryStore.find(projectId, deliveryId))
-        .thenReturn(Optional.of(pendingDelivery()))
-        .thenReturn(Optional.of(Delivery.builder().status(DeliveryStatus.DELIVERED).build()));
-    when(fanoutStore.find(projectId, eventId)).thenReturn(Optional.of(snapshot()));
-    when(endpointService.getSigningSecret(endpointId, projectId)).thenReturn("whsec_dGVzdA==");
-    when(signer.sign(any(UUID.class), any(Long.class), any(byte[].class), any(String.class)))
-        .thenReturn("v1,sig");
-    when(deliveryStore.startAttempt(projectId, deliveryId, leaseToken))
-        .thenReturn(Optional.of(startedAttempt()));
-    when(transport.send(any(String.class), any(byte[].class), any(Map.class)))
-        .thenAnswer(invocation -> {
-          Thread.sleep(5);
-          return new TransportResult(
-              200, "ok", Instant.now(), AttemptOutcome.SUCCEEDED, null, null, null);
-        });
-    when(deliveryStore.finishAttempt(
-            any(),
-            any(),
-            any(),
-            any(),
-            eq(AttemptOutcome.SUCCEEDED),
-            any(),
-            anyLong(),
-            any(),
-            any()))
-        .thenReturn(true);
+  void givenDnsLookupTimeout_whenProcess_thenRetryScheduled() throws Exception {
+    stubAttempt(DeliveryStatus.RETRY_SCHEDULED, "https://customer.example/hook");
+    var failure = new UnknownHostException("DNS lookup timed out");
+    failure.initCause(new TimeoutException());
+    var actualTransport = stubDnsFailure(failure);
+    try {
+      assertRetryableFailure("DNS_TIMEOUT");
+    } finally {
+      actualTransport.destroy();
+    }
+  }
 
-    worker.process(projectId, deliveryId, leaseToken);
+  @Test
+  void givenPeerEofDuringTlsHandshake_whenProcess_thenRetryScheduled() throws Exception {
+    stubAttempt(DeliveryStatus.RETRY_SCHEDULED);
+    var failure = new SSLHandshakeException("Remote host terminated the handshake");
+    failure.initCause(new EOFException());
+    stubTransportFailure(new IllegalStateException("TLS upgrade failed", failure));
+
+    assertRetryableFailure("TRANSPORT_FAILURE");
+  }
+
+  @Test
+  void givenIoFailure_whenProcess_thenRetryScheduledWithElapsedDuration() throws Exception {
+    stubAttempt(DeliveryStatus.RETRY_SCHEDULED);
+    stubTransportFailure(new IOException("connection reset"));
+
+    assertRetryableFailure("TRANSPORT_FAILURE");
+  }
+
+  @Test
+  void givenTransportDuration_whenSendSucceeds_thenExactDurationIsStored() throws Exception {
+    stubAttempt(DeliveryStatus.DELIVERED);
+    when(transport.send(any(String.class), any(byte[].class), anyMap()))
+        .thenReturn(
+            new TransportResult(
+                200, "ok", Instant.now(), AttemptOutcome.SUCCEEDED, 73L, null, null));
+
+    assertThat(worker.process(projectId, deliveryId, leaseToken))
+        .isEqualTo(DeliveryStatus.DELIVERED);
 
     verify(deliveryStore)
         .finishAttempt(
@@ -263,19 +239,115 @@ class DeliveryWorkerTest {
             eq(leaseToken),
             eq(attemptId),
             eq(AttemptOutcome.SUCCEEDED),
-            any(),
+            eq(200),
+            eq(73L),
+            isNull(),
+            isNull());
+  }
+
+  private void stubAttempt(DeliveryStatus status) {
+    stubAttempt(status, "https://8.8.8.8/hook");
+  }
+
+  private void stubAttempt(DeliveryStatus status, String destinationUrl) {
+    var delivery = pendingDelivery(destinationUrl);
+    when(deliveryStore.find(projectId, deliveryId))
+        .thenReturn(Optional.of(delivery))
+        .thenReturn(Optional.of(Delivery.builder().status(status).build()));
+    when(fanoutStore.find(projectId, eventId)).thenReturn(Optional.of(snapshot()));
+    when(endpointService.getSigningSecret(endpointId, projectId)).thenReturn("whsec_dGVzdA==");
+    when(signer.sign(any(UUID.class), any(Long.class), any(byte[].class), any(String.class)))
+        .thenReturn("v1,sig");
+    when(deliveryStore.startAttempt(projectId, deliveryId, leaseToken))
+        .thenReturn(Optional.of(startedAttempt()));
+    when(deliveryStore.finishAttempt(
+            any(), any(), any(), any(), any(), any(), anyLong(), any(), any()))
+        .thenReturn(true);
+  }
+
+  private void stubTransportFailure(Throwable cause) throws TransportException {
+    when(transport.send(any(String.class), any(byte[].class), anyMap()))
+        .thenThrow(new TransportException("Send failed", cause));
+  }
+
+  private SsrfSafeWebhookTransport stubDnsFailure(UnknownHostException failure)
+      throws TransportException {
+    DnsResolver resolver =
+        host -> {
+          throw failure;
+        };
+    var actualTransport =
+        new SsrfSafeWebhookTransport(
+            new DefaultSsrfUrlValidator(resolver),
+            resolver,
+            new WebhookTransportProperties(null, null, null, 0, 0, 0));
+    when(transport.send(any(String.class), any(byte[].class), anyMap()))
+        .thenAnswer(call ->
+            actualTransport.send(call.getArgument(0), call.getArgument(1), call.getArgument(2)));
+    return actualTransport;
+  }
+
+  private void assertPermanentFailure(String expectedErrorCode) {
+    assertThat(worker.process(projectId, deliveryId, leaseToken))
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
+
+    var outcome = ArgumentCaptor.forClass(AttemptOutcome.class);
+    var httpStatus = ArgumentCaptor.forClass(Integer.class);
+    var errorCode = ArgumentCaptor.forClass(String.class);
+    var retryAt = ArgumentCaptor.forClass(Instant.class);
+    verify(deliveryStore)
+        .finishAttempt(
+            eq(projectId),
+            eq(deliveryId),
+            eq(leaseToken),
+            eq(attemptId),
+            outcome.capture(),
+            httpStatus.capture(),
             anyLong(),
-            any(),
-            any());
+            errorCode.capture(),
+            retryAt.capture());
+    assertThat(outcome.getValue()).isEqualTo(AttemptOutcome.PERMANENT_FAILURE);
+    assertThat(httpStatus.getValue()).isNull();
+    assertThat(errorCode.getValue()).isEqualTo(expectedErrorCode);
+    assertThat(retryAt.getValue()).isNull();
+    verifyNoInteractions(retryScheduler);
+  }
+
+  private void assertRetryableFailure(String expectedErrorCode) {
+    Instant retryAt = Instant.now().plusSeconds(10);
+    when(retryScheduler.nextAttemptAt(eq(1), isNull(), any(Instant.class))).thenReturn(retryAt);
+
+    long startedNanos = System.nanoTime();
+    assertThat(worker.process(projectId, deliveryId, leaseToken))
+        .isEqualTo(DeliveryStatus.RETRY_SCHEDULED);
+    long elapsedMs = Duration.ofNanos(System.nanoTime() - startedNanos).toMillis();
+
+    var duration = ArgumentCaptor.forClass(Long.class);
+    verify(deliveryStore)
+        .finishAttempt(
+            eq(projectId),
+            eq(deliveryId),
+            eq(leaseToken),
+            eq(attemptId),
+            eq(AttemptOutcome.RETRYABLE_FAILURE),
+            isNull(),
+            duration.capture(),
+            eq(expectedErrorCode),
+            eq(retryAt));
+    assertThat(duration.getValue()).isBetween(0L, elapsedMs);
   }
 
   private Delivery pendingDelivery() {
+    return pendingDelivery("https://8.8.8.8/hook");
+  }
+
+  private Delivery pendingDelivery(String destinationUrl) {
     return Delivery.builder()
         .id(deliveryId)
         .projectId(projectId)
         .eventId(eventId)
         .endpointId(endpointId)
-        .destinationUrl("https://8.8.8.8/hook")
+        .destinationUrl(destinationUrl)
         .status(DeliveryStatus.PENDING)
         .attemptCount(0)
         .cycleNumber(0)
