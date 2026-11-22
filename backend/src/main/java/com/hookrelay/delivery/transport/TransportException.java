@@ -6,6 +6,7 @@ import java.io.Serial;
 import java.net.UnknownHostException;
 import java.security.cert.CertPathValidatorException;
 import java.security.cert.CertificateException;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeoutException;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLHandshakeException;
@@ -76,9 +77,13 @@ public class TransportException extends Exception {
         return new TransportException(message, failure, true, "TLS_FAILURE");
       }
       if (cause instanceof UnknownHostException) {
-        boolean timedOut = hasCause(cause, TimeoutException.class);
-        return new TransportException(
-            message, failure, !timedOut, timedOut ? "DNS_TIMEOUT" : "DNS_FAILURE");
+        if (hasCause(cause, TimeoutException.class)) {
+          return new TransportException(message, failure, false, "DNS_TIMEOUT");
+        }
+        if (hasCause(cause, RejectedExecutionException.class)) {
+          return new TransportException(message, failure, false, "DNS_CAPACITY_UNAVAILABLE");
+        }
+        return new TransportException(message, failure, true, "DNS_FAILURE");
       }
     }
     return new TransportException(message, failure, false, "TRANSPORT_FAILURE");

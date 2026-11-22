@@ -44,8 +44,9 @@ state.
 
 ## 3. Retry classification
 
-The transport layer (`SsrfSafeWebhookTransport`) classifies HTTP responses; the worker classifies
-transport-level exceptions. The combined policy:
+The transport classifies HTTP responses and transport failures. For DNS failures, a
+timeout or executor rejection in the cause chain signals a retryable failure. The
+worker uses that classification to apply the following policy:
 
 | Result                             | Behaviour                                    |
 |------------------------------------|----------------------------------------------|
@@ -56,7 +57,8 @@ transport-level exceptions. The combined policy:
 | Connection timeout / network IO    | Retry                                        |
 | SSRF policy violation              | Permanent (`SSRF_REJECTED`) — not retried    |
 | DNS lookup timeout                 | Retry (`DNS_TIMEOUT`)                        |
-| Permanent DNS resolution failure   | Permanent (`DNS_FAILURE`)                   |
+| DNS executor capacity unavailable  | Retry (`DNS_CAPACITY_UNAVAILABLE`)            |
+| DNS failure without a retry cause  | Permanent (`DNS_FAILURE`)                   |
 | Peer EOF during TLS handshake      | Retry (`TRANSPORT_FAILURE`)                  |
 | Other TLS failure (including trust or hostname) | Permanent (`TLS_FAILURE`)        |
 | Most other HTTP 4xx                | Permanent failure                            |

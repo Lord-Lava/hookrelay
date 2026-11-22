@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeoutException;
 import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLPeerUnverifiedException;
@@ -198,6 +199,19 @@ class DeliveryWorkerTest {
     var actualTransport = stubDnsFailure(failure);
     try {
       assertRetryableFailure("DNS_TIMEOUT");
+    } finally {
+      actualTransport.destroy();
+    }
+  }
+
+  @Test
+  void givenDnsExecutorSaturation_whenProcess_thenRetryScheduled() throws Exception {
+    stubAttempt(DeliveryStatus.RETRY_SCHEDULED, "https://customer.example/hook");
+    var failure = new UnknownHostException("DNS capacity unavailable");
+    failure.initCause(new RejectedExecutionException());
+    var actualTransport = stubDnsFailure(failure);
+    try {
+      assertRetryableFailure("DNS_CAPACITY_UNAVAILABLE");
     } finally {
       actualTransport.destroy();
     }
