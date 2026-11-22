@@ -3,7 +3,6 @@ package com.hookrelay.delivery.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.hookrelay.delivery.application.RetryScheduler;
 import com.hookrelay.delivery.domain.AttemptOutcome;
 import com.hookrelay.delivery.domain.Delivery;
 import com.hookrelay.delivery.domain.DeliveryPolicy;
@@ -23,70 +22,26 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.flywaydb.core.Flyway;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
-@Testcontainers
-class DeliveryStoreIntegrationTest {
-  @Container static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:18.7-alpine");
-
-  private DriverManagerDataSource source;
-  private JdbcTemplate jdbc;
-  private TransactionTemplate tx;
+class DeliveryStoreIntegrationTest extends AbstractDeliveryIntegrationTest {
   private FanoutStore fanouts;
-  private DeliveryStore deliveries;
-  private final RetryScheduler retryScheduler = new RetryScheduler(10, 3600, Duration.ofHours(24));
-  private String schema;
-  private UUID project;
   private UUID foreignProject;
-  private UUID endpoint;
-  private UUID event;
   private final DeliveryPolicy policy = new DeliveryPolicy("v1", 8, Duration.ofHours(24));
   private final byte[] body = "{\"data\":{}}".getBytes(StandardCharsets.UTF_8);
 
   @BeforeEach
-  void setUp() {
-    schema = "delivery_" + UUID.randomUUID().toString().replace("-", "");
-    source =
-        new DriverManagerDataSource(
-            postgres.getJdbcUrl()
-                + (postgres.getJdbcUrl().contains("?") ? "&" : "?")
-                + "currentSchema="
-                + schema,
-            postgres.getUsername(),
-            postgres.getPassword());
-    jdbc = new JdbcTemplate(source);
-    // Schema is generated locally, never derived from external input.
-    jdbc.execute("CREATE SCHEMA " + schema);
-    migrate("11");
-    tx = new TransactionTemplate(new DataSourceTransactionManager(source));
-    fanouts = new FanoutStore(jdbc, tx);
-    deliveries = new DeliveryStore(jdbc, tx, retryScheduler);
-    UUID org = UUID.randomUUID();
-    project = UUID.randomUUID();
+  protected void setUp() {
+    super.setUp();
     foreignProject = UUID.randomUUID();
-    endpoint = UUID.randomUUID();
-    event = UUID.randomUUID();
-    jdbc.update("INSERT INTO organizations(id,name) VALUES (?, 'test')", org);
-    for (UUID id : List.of(project, foreignProject))
-      jdbc.update(
-          """
-          INSERT INTO projects(id,organization_id,name,environment) VALUES (?,?,?,'development')
-          """,
-          id,
-          org,
-          id.toString());
+    seedProject(foreignProject, organizationId, foreignProject.toString());
+    fanouts = new FanoutStore(jdbc, tx);
     jdbc.update(
         """
         INSERT INTO endpoints(id,project_id,url,signing_secret_ciphertext,signing_secret_nonce,signing_secret_key_version)
@@ -95,28 +50,6 @@ class DeliveryStoreIntegrationTest {
         endpoint,
         project,
         new byte[12]);
-    jdbc.update(
-        """
-        INSERT INTO events(id,project_id,event_type,payload,request_fingerprint) VALUES (?,?,'test.created','{}',?)
-        """,
-        event,
-        project,
-        "a".repeat(64));
-  }
-
-  @AfterEach
-  void cleanUp() {
-    if (jdbc != null) jdbc.execute("DROP SCHEMA " + schema + " CASCADE");
-  }
-
-  private void migrate(String target) {
-    Flyway.configure()
-        .dataSource(source)
-        .schemas(schema)
-        .defaultSchema(schema)
-        .target(target)
-        .load()
-        .migrate();
   }
 
   private Delivery create() {

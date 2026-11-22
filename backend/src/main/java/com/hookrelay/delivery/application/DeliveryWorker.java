@@ -7,11 +7,11 @@ import com.hookrelay.delivery.domain.FanoutSnapshot;
 import com.hookrelay.delivery.repository.DeliveryStore;
 import com.hookrelay.delivery.repository.FanoutStore;
 import com.hookrelay.delivery.signing.WebhookSigner;
+import com.hookrelay.delivery.transport.TransportException;
 import com.hookrelay.delivery.transport.TransportResult;
 import com.hookrelay.delivery.transport.WebhookTransport;
 import com.hookrelay.endpoint.application.EndpointService;
 import com.hookrelay.security.ssrf.SsrfValidationException;
-import java.io.IOException;
 import java.net.UnknownHostException;
 import java.time.Duration;
 import java.time.Instant;
@@ -140,48 +140,46 @@ public class DeliveryWorker {
    * Classifies a transport-level failure into a retryable or permanent outcome. SSRF policy
    * violations, DNS resolution failures and TLS failures are permanent security/configuration
    * failures that must not be retried; only transient I/O/connection failures are retryable.
+   *
+   * <p>The permanence decision is made once at the transport boundary and carried on {@link
+   * TransportException}; this method reads it rather than re-deriving it by walking the cause
+   * chain. A cause-walk fallback handles exceptions not produced at the transport boundary (for
+   * example, test-constructed failures).
    */
   private static TransportResult classifyTransportFailure(
       Exception e, Instant startedAt, long durationMs) {
-    Throwable cause = e;
-    while (cause != null) {
-      if (cause instanceof SsrfValidationException) {
-        return new TransportResult(
-            0,
-            null,
-            startedAt,
-            AttemptOutcome.PERMANENT_FAILURE,
-            durationMs,
-            "SSRF_REJECTED",
-            null);
+    AttemptOutcome outcome = null;
+    String errorCode = null;
+    if (e instanceof TransportException te && te.failureCategory() != null) {
+      outcome =
+          te.isPermanent() ? AttemptOutcome.PERMANENT_FAILURE : AttemptOutcome.RETRYABLE_FAILURE;
+      errorCode = te.failureCategory();
+    } else {
+      // Fallback: exceptions not produced at the transport boundary.
+      Throwable cause = e;
+      while (cause != null) {
+        if (cause instanceof SsrfValidationException) {
+          outcome = AttemptOutcome.PERMANENT_FAILURE;
+          errorCode = "SSRF_REJECTED";
+          break;
+        }
+        if (cause instanceof SSLException) {
+          outcome = AttemptOutcome.PERMANENT_FAILURE;
+          errorCode = "TLS_FAILURE";
+          break;
+        }
+        if (cause instanceof UnknownHostException) {
+          outcome = AttemptOutcome.PERMANENT_FAILURE;
+          errorCode = "DNS_FAILURE";
+          break;
+        }
+        cause = cause.getCause();
       }
-      if (cause instanceof SSLException) {
-        return new TransportResult(
-            0, null, startedAt, AttemptOutcome.PERMANENT_FAILURE, durationMs, "TLS_FAILURE", null);
+      if (outcome == null) {
+        outcome = AttemptOutcome.RETRYABLE_FAILURE;
+        errorCode = "TRANSPORT_FAILURE";
       }
-      if (cause instanceof UnknownHostException) {
-        return new TransportResult(
-            0, null, startedAt, AttemptOutcome.PERMANENT_FAILURE, durationMs, "DNS_FAILURE", null);
-      }
-      cause = cause.getCause();
     }
-    if (e instanceof IOException) {
-      return new TransportResult(
-          0,
-          null,
-          startedAt,
-          AttemptOutcome.RETRYABLE_FAILURE,
-          durationMs,
-          "TRANSPORT_FAILURE",
-          null);
-    }
-    return new TransportResult(
-        0,
-        null,
-        startedAt,
-        AttemptOutcome.RETRYABLE_FAILURE,
-        durationMs,
-        "TRANSPORT_FAILURE",
-        null);
+    return new TransportResult(0, null, startedAt, outcome, durationMs, errorCode, null);
   }
 }
