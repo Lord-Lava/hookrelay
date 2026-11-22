@@ -3,12 +3,12 @@ package com.hookrelay.delivery.repository;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.hookrelay.delivery.application.RetryScheduler;
 import com.hookrelay.delivery.domain.AttemptOutcome;
 import com.hookrelay.delivery.domain.Delivery;
 import com.hookrelay.delivery.domain.DeliveryPolicy;
 import com.hookrelay.delivery.domain.DeliveryStatus;
 import java.nio.charset.StandardCharsets;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -22,70 +22,26 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.flywaydb.core.Flyway;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
-import org.springframework.transaction.support.TransactionTemplate;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.postgresql.PostgreSQLContainer;
 
-@Testcontainers
-class DeliveryStoreIntegrationTest {
-  @Container static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:18.7-alpine");
-
-  private DriverManagerDataSource source;
-  private JdbcTemplate jdbc;
-  private TransactionTemplate tx;
+class DeliveryStoreIntegrationTest extends AbstractDeliveryIntegrationTest {
   private FanoutStore fanouts;
-  private DeliveryStore deliveries;
-  private final RetryScheduler retryScheduler = new RetryScheduler(10, 3600, Duration.ofHours(24));
-  private String schema;
-  private UUID project;
   private UUID foreignProject;
-  private UUID endpoint;
-  private UUID event;
   private final DeliveryPolicy policy = new DeliveryPolicy("v1", 8, Duration.ofHours(24));
   private final byte[] body = "{\"data\":{}}".getBytes(StandardCharsets.UTF_8);
 
   @BeforeEach
-  void setUp() {
-    schema = "delivery_" + UUID.randomUUID().toString().replace("-", "");
-    source =
-        new DriverManagerDataSource(
-            postgres.getJdbcUrl()
-                + (postgres.getJdbcUrl().contains("?") ? "&" : "?")
-                + "currentSchema="
-                + schema,
-            postgres.getUsername(),
-            postgres.getPassword());
-    jdbc = new JdbcTemplate(source);
-    // Schema is generated locally, never derived from external input.
-    jdbc.execute("CREATE SCHEMA " + schema);
-    migrate("11");
-    tx = new TransactionTemplate(new DataSourceTransactionManager(source));
-    fanouts = new FanoutStore(jdbc, tx);
-    deliveries = new DeliveryStore(jdbc, tx, retryScheduler);
-    UUID org = UUID.randomUUID();
-    project = UUID.randomUUID();
+  protected void setUp() {
+    super.setUp();
     foreignProject = UUID.randomUUID();
-    endpoint = UUID.randomUUID();
-    event = UUID.randomUUID();
-    jdbc.update("INSERT INTO organizations(id,name) VALUES (?, 'test')", org);
-    for (UUID id : List.of(project, foreignProject))
-      jdbc.update(
-          """
-          INSERT INTO projects(id,organization_id,name,environment) VALUES (?,?,?,'development')
-          """,
-          id,
-          org,
-          id.toString());
+    seedProject(foreignProject, organizationId, foreignProject.toString());
+    fanouts = new FanoutStore(jdbc, tx);
     jdbc.update(
         """
         INSERT INTO endpoints(id,project_id,url,signing_secret_ciphertext,signing_secret_nonce,signing_secret_key_version)
@@ -94,28 +50,6 @@ class DeliveryStoreIntegrationTest {
         endpoint,
         project,
         new byte[12]);
-    jdbc.update(
-        """
-        INSERT INTO events(id,project_id,event_type,payload,request_fingerprint) VALUES (?,?,'test.created','{}',?)
-        """,
-        event,
-        project,
-        "a".repeat(64));
-  }
-
-  @AfterEach
-  void cleanUp() {
-    if (jdbc != null) jdbc.execute("DROP SCHEMA " + schema + " CASCADE");
-  }
-
-  private void migrate(String target) {
-    Flyway.configure()
-        .dataSource(source)
-        .schemas(schema)
-        .defaultSchema(schema)
-        .target(target)
-        .load()
-        .migrate();
   }
 
   private Delivery create() {
@@ -614,6 +548,205 @@ class DeliveryStoreIntegrationTest {
     } finally {
       jdbc.execute("DROP SCHEMA " + legacy + " CASCADE");
     }
+  }
+
+  @Test
+  void retryHorizonExceededDeadLettersWithoutAttempt() {
+    Delivery d = create();
+    Instant now = Instant.now();
+    tx.executeWithoutResult(status -> {
+      jdbc.update(
+          """
+          UPDATE deliveries SET status='RETRY_SCHEDULED', next_attempt_at=?, cycle_deadline=?,
+            cycle_started_at=?
+          WHERE project_id=? AND id=?
+          """,
+          Timestamp.from(now.minusSeconds(120)),
+          Timestamp.from(now.minusSeconds(60)),
+          Timestamp.from(now.minusSeconds(300)),
+          project,
+          d.id());
+      jdbc.update(
+          """
+          UPDATE delivery_cycles SET started_at=?, deadline=? WHERE project_id=? AND delivery_id=? AND cycle_number=0
+          """,
+          Timestamp.from(now.minusSeconds(300)),
+          Timestamp.from(now.minusSeconds(60)),
+          project,
+          d.id());
+    });
+    assertThat(deliveries.expireHorizon(project, d.id())).isTrue();
+    assertThat(deliveries.find(project, d.id()).orElseThrow().status())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(deliveries.attempts(project, d.id(), 100, 0)).isEmpty();
+    assertThat(deliveries.cycles(project, d.id(), 100, 0).getFirst().terminalStatus())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(deliveries.expireHorizon(project, d.id())).isFalse();
+  }
+
+  @Test
+  void deadLetteredStatePreservesDiagnosticInfoAndAttemptHistory() {
+    Delivery d = create();
+    Delivery claimed = claim(d.id());
+    var first = deliveries.startAttempt(project, d.id(), claimed.leaseToken()).orElseThrow();
+    Instant due = Instant.now().plusSeconds(60);
+    assertThat(
+            deliveries.finishAttempt(
+                project,
+                d.id(),
+                claimed.leaseToken(),
+                first.id(),
+                AttemptOutcome.PERMANENT_FAILURE,
+                400,
+                10,
+                "HTTP_4XX",
+                null))
+        .isTrue();
+    var dead = deliveries.find(project, d.id()).orElseThrow();
+    assertThat(dead.status()).isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(dead.lastErrorCode()).isEqualTo("HTTP_4XX");
+    assertThat(dead.terminalAt()).isNotNull();
+    assertThat(dead.nextAttemptAt()).isNull();
+    assertThat(dead.leaseToken()).isNull();
+
+    var attempts = deliveries.attempts(project, d.id(), 100, 0);
+    assertThat(attempts).hasSize(1);
+    assertThat(attempts.getFirst().outcome()).isEqualTo(AttemptOutcome.PERMANENT_FAILURE);
+    assertThat(attempts.getFirst().httpStatus()).isEqualTo(400);
+    assertThat(attempts.getFirst().errorCode()).isEqualTo("HTTP_4XX");
+    assertThat(attempts.getFirst().durationMs()).isEqualTo(10L);
+
+    assertThat(
+            deliveries.finishAttempt(
+                project,
+                d.id(),
+                claimed.leaseToken(),
+                first.id(),
+                AttemptOutcome.PERMANENT_FAILURE,
+                400,
+                10,
+                "HTTP_4XX",
+                null))
+        .isFalse();
+    assertThat(deliveries.find(project, d.id()).orElseThrow().status())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(deliveries.attempts(project, d.id(), 100, 0)).hasSize(1);
+  }
+
+  @Test
+  void retryableFailureReschedulesAndRestartRecoveryResumes() {
+    Delivery d = create();
+    Delivery claimed = claim(d.id());
+    var first = deliveries.startAttempt(project, d.id(), claimed.leaseToken()).orElseThrow();
+    Instant due = Instant.now().plusSeconds(60);
+    assertThat(
+            deliveries.finishAttempt(
+                project,
+                d.id(),
+                claimed.leaseToken(),
+                first.id(),
+                AttemptOutcome.RETRYABLE_FAILURE,
+                503,
+                10,
+                "HTTP_5XX",
+                due))
+        .isTrue();
+    var scheduled = deliveries.find(project, d.id()).orElseThrow();
+    assertThat(scheduled.status()).isEqualTo(DeliveryStatus.RETRY_SCHEDULED);
+    assertThat(scheduled.nextAttemptAt().truncatedTo(java.time.temporal.ChronoUnit.MILLIS))
+        .isEqualTo(due.truncatedTo(java.time.temporal.ChronoUnit.MILLIS));
+    assertThat(deliveries.claim(project, d.id(), "too-early", Duration.ofSeconds(60))).isEmpty();
+
+    jdbc.update(
+        "UPDATE deliveries SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE project_id=? AND id=?",
+        project,
+        d.id());
+    DeliveryStore restarted = new DeliveryStore(jdbc, tx, retryScheduler);
+    Delivery reclaimed =
+        restarted.claim(project, d.id(), "restarted-worker", Duration.ofSeconds(60)).orElseThrow();
+    assertThat(reclaimed.leaseToken()).isNotEqualTo(claimed.leaseToken());
+    assertThat(reclaimed.status()).isEqualTo(DeliveryStatus.IN_PROGRESS);
+    assertThat(reclaimed.nextAttemptAt()).isNull();
+  }
+
+  @Test
+  void multipleAttemptsPreserveFullHistory() {
+    Delivery d = create();
+    jdbc.update(
+        "UPDATE deliveries SET max_attempts=3 WHERE project_id=? AND id=?", project, d.id());
+    jdbc.update(
+        "UPDATE delivery_cycles SET max_attempts=3 WHERE project_id=? AND delivery_id=? AND cycle_number=0",
+        project,
+        d.id());
+
+    Optional<Delivery> claimed =
+        deliveries.claim(project, d.id(), "test-worker", Duration.ofSeconds(60));
+    assertThat(claimed).isPresent();
+    Delivery claim1 = claimed.orElseThrow();
+    var a1 = deliveries.startAttempt(project, d.id(), claim1.leaseToken()).orElseThrow();
+    Instant t1 = Instant.now();
+    deliveries.finishAttempt(
+        project,
+        d.id(),
+        claim1.leaseToken(),
+        a1.id(),
+        AttemptOutcome.RETRYABLE_FAILURE,
+        503,
+        10,
+        "HTTP_5XX",
+        t1.plusSeconds(30));
+
+    jdbc.update(
+        "UPDATE deliveries SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE project_id=? AND id=?",
+        project,
+        d.id());
+    Optional<Delivery> claimed2 =
+        deliveries.claim(project, d.id(), "test-worker", Duration.ofSeconds(60));
+    assertThat(claimed2).isPresent();
+    Delivery claim2 = claimed2.orElseThrow();
+    var a2 = deliveries.startAttempt(project, d.id(), claim2.leaseToken()).orElseThrow();
+    deliveries.finishAttempt(
+        project,
+        d.id(),
+        claim2.leaseToken(),
+        a2.id(),
+        AttemptOutcome.RETRYABLE_FAILURE,
+        503,
+        12,
+        "HTTP_5XX",
+        Instant.now().plusSeconds(60));
+
+    jdbc.update(
+        "UPDATE deliveries SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE project_id=? AND id=?",
+        project,
+        d.id());
+    Optional<Delivery> claimed3 =
+        deliveries.claim(project, d.id(), "test-worker", Duration.ofSeconds(60));
+    assertThat(claimed3).isPresent();
+    Delivery claim3 = claimed3.orElseThrow();
+    var a3 = deliveries.startAttempt(project, d.id(), claim3.leaseToken()).orElseThrow();
+    deliveries.finishAttempt(
+        project,
+        d.id(),
+        claim3.leaseToken(),
+        a3.id(),
+        AttemptOutcome.PERMANENT_FAILURE,
+        503,
+        8,
+        "HTTP_5XX",
+        null);
+
+    var attempts = deliveries.attempts(project, d.id(), 100, 0);
+    assertThat(attempts).hasSize(3);
+    assertThat(attempts.get(0).attemptNumber()).isEqualTo(1);
+    assertThat(attempts.get(0).outcome()).isEqualTo(AttemptOutcome.RETRYABLE_FAILURE);
+    assertThat(attempts.get(1).attemptNumber()).isEqualTo(2);
+    assertThat(attempts.get(2).attemptNumber()).isEqualTo(3);
+    assertThat(attempts.get(2).outcome()).isEqualTo(AttemptOutcome.PERMANENT_FAILURE);
+    assertThat(deliveries.find(project, d.id()).orElseThrow().status())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
+    assertThat(deliveries.cycles(project, d.id(), 100, 0).getFirst().terminalStatus())
+        .isEqualTo(DeliveryStatus.DEAD_LETTERED);
   }
 
   private static <T> List<T> race(Callable<T> operation) throws Exception {

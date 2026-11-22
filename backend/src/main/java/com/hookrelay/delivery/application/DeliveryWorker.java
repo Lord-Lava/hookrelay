@@ -7,6 +7,7 @@ import com.hookrelay.delivery.domain.FanoutSnapshot;
 import com.hookrelay.delivery.repository.DeliveryStore;
 import com.hookrelay.delivery.repository.FanoutStore;
 import com.hookrelay.delivery.signing.WebhookSigner;
+import com.hookrelay.delivery.transport.TransportException;
 import com.hookrelay.delivery.transport.TransportResult;
 import com.hookrelay.delivery.transport.WebhookTransport;
 import com.hookrelay.endpoint.application.EndpointService;
@@ -96,29 +97,21 @@ public class DeliveryWorker {
     }
 
     TransportResult result;
+    final Instant transportStartedAt = Instant.now();
+    final long transportStartNanos = System.nanoTime();
     try {
       result = transport.send(delivery.destinationUrl(), bodyBytes, headers);
     } catch (Exception e) {
-      long durationMs = Duration.between(Instant.now(), Instant.now()).toMillis();
-      result =
-          new TransportResult(
-              0,
-              null,
-              Instant.now(),
-              AttemptOutcome.RETRYABLE_FAILURE,
-              durationMs,
-              "TRANSPORT_FAILURE",
-              null);
+      long durationMs = Duration.ofNanos(System.nanoTime() - transportStartNanos).toMillis();
+      result = classifyTransportFailure(e, transportStartedAt, durationMs);
     }
 
     Instant retryAt = result.retryAt();
     Instant now2 = Instant.now();
     if (retryAt != null && result.outcome() == AttemptOutcome.RETRYABLE_FAILURE) {
-      long delaySeconds = Duration.between(now2, retryAt).getSeconds();
-      if (delaySeconds < 0) {
-        delaySeconds = 0;
-      }
-      retryAt = retryScheduler.nextAttemptAt(attempt.attemptNumber(), (int) delaySeconds, now2);
+      long delaySeconds = Math.max(0L, Duration.between(now2, retryAt).getSeconds());
+      int retryAfterHint = (int) Math.min(delaySeconds, Integer.MAX_VALUE);
+      retryAt = retryScheduler.nextAttemptAt(attempt.attemptNumber(), retryAfterHint, now2);
     } else if (result.outcome() == AttemptOutcome.RETRYABLE_FAILURE) {
       retryAt = retryScheduler.nextAttemptAt(attempt.attemptNumber(), null, now2);
     }
@@ -139,5 +132,23 @@ public class DeliveryWorker {
               finalRetryAt);
       return finalized ? deliveryStore.find(projectId, deliveryId).orElse(null).status() : null;
     });
+  }
+
+  /** Uses the transport's classification, with a fallback for uncategorized exceptions. */
+  private static TransportResult classifyTransportFailure(
+      Exception e, Instant startedAt, long durationMs) {
+    TransportException failure =
+        e instanceof TransportException transportFailure
+                && transportFailure.failureCategory() != null
+            ? transportFailure
+            : TransportException.classify("Transport failure", e);
+    return new TransportResult(
+        0,
+        null,
+        startedAt,
+        failure.isPermanent() ? AttemptOutcome.PERMANENT_FAILURE : AttemptOutcome.RETRYABLE_FAILURE,
+        durationMs,
+        failure.failureCategory(),
+        null);
   }
 }

@@ -305,19 +305,15 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
             statusCode, responseBody, sentAt, outcome, durationMs, null, retryAt);
       }
     } catch (SsrfValidationException e) {
-      // Permanent policy failure - URL validation or DNS address policy rejected.
-      throw new TransportException("URL validation failed: " + e.getMessage(), e);
+      throw TransportException.classify("URL validation failed: " + e.getMessage(), e);
     } catch (UnknownHostException e) {
-      // Permanent infrastructure failure - DNS cannot resolve.
-      throw new TransportException("Unable to resolve endpoint hostname", e);
+      throw TransportException.classify("Unable to resolve endpoint hostname", e);
     } catch (SSLException e) {
-      // Permanent security failure - TLS hostname or certificate verification failed.
-      throw new TransportException("TLS verification failed: " + e.getMessage(), e);
+      throw TransportException.classify("TLS failed: " + e.getMessage(), e);
     } catch (IOException e) {
-      // Transient infrastructure failure - may be retried by caller.
-      throw new TransportException("Transport I/O failure: " + e.getMessage(), e);
+      throw TransportException.classify("Transport I/O failure: " + e.getMessage(), e);
     } catch (Exception e) {
-      throw new TransportException("Transport failure: " + e.getMessage(), e);
+      throw TransportException.classify("Transport failure: " + e.getMessage(), e);
     }
   }
 

@@ -3,6 +3,7 @@ package com.hookrelay.delivery.application;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -14,15 +15,22 @@ import java.util.concurrent.ThreadLocalRandom;
  * Retry-After values are clamped to {@code maxSeconds} and combined by taking the maximum with
  * jittered backoff. All computed {@code nextAttemptAt} values are clamped to the cycle deadline;
  * attempts beyond the deadline are dead-lettered instead of retried.
+ *
+ * <p>The jitter source is injectable so retry calculations can be tested deterministically. When no
+ * source is supplied, {@link ThreadLocalRandom#current()} is used.
  */
 public class RetryScheduler {
 
   private final int baseSeconds;
   private final int maxSeconds;
   private final Duration cycleDeadline;
-  private final ThreadLocalRandom random = ThreadLocalRandom.current();
+  private final Random random;
 
   public RetryScheduler(int baseSeconds, int maxSeconds, Duration cycleDeadline) {
+    this(baseSeconds, maxSeconds, cycleDeadline, ThreadLocalRandom.current());
+  }
+
+  RetryScheduler(int baseSeconds, int maxSeconds, Duration cycleDeadline, Random random) {
     if (baseSeconds < 1
         || baseSeconds > 3600
         || maxSeconds < baseSeconds
@@ -35,6 +43,7 @@ public class RetryScheduler {
     this.baseSeconds = baseSeconds;
     this.maxSeconds = maxSeconds;
     this.cycleDeadline = cycleDeadline;
+    this.random = random;
   }
 
   /**
@@ -54,8 +63,14 @@ public class RetryScheduler {
       throw new IllegalArgumentException("Now must not be null");
     }
 
-    long backoffSeconds =
-        attemptNumber - 1 >= 63 ? Long.MAX_VALUE : (long) baseSeconds * (1L << (attemptNumber - 1));
+    // Exponential backoff: baseSeconds * 2^(attemptNumber-1), capped at maxSeconds.
+    // Scale iteratively and stop once the value reaches maxSeconds; the result will be
+    // capped anyway, so this never overflows even for very large attempt numbers.
+    long backoffSeconds = baseSeconds;
+    for (int i = 1; i < attemptNumber; i++) {
+      if (backoffSeconds > maxSeconds) break;
+      backoffSeconds *= 2;
+    }
     long capSeconds = Math.min(maxSeconds, backoffSeconds);
     long jitteredSeconds = random.nextLong(capSeconds / 2, capSeconds + 1);
 
