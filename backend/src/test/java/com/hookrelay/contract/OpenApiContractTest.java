@@ -2,6 +2,8 @@ package com.hookrelay.contract;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.hookrelay.delivery.api.DeliveryReplayController;
+import com.hookrelay.delivery.api.DeliveryReplayController.ReplayResponse;
 import com.hookrelay.endpoint.api.CreatedEndpointResponse;
 import com.hookrelay.endpoint.api.EndpointController;
 import com.hookrelay.endpoint.api.EndpointCreateRequest;
@@ -58,6 +60,7 @@ class OpenApiContractTest {
     Set<String> implemented = new HashSet<>();
     for (Class<?> controller :
         List.of(
+            DeliveryReplayController.class,
             EndpointController.class,
             EndpointSubscriptionController.class,
             EventController.class)) {
@@ -102,6 +105,8 @@ class OpenApiContractTest {
             CreatedEndpointResponse.class,
             "RotateSecretResult",
             RotateSecretResponse.class,
+            "ReplayResponse",
+            ReplayResponse.class,
             "EndpointSubscription",
             SubscriptionResponse.class,
             "SubscriptionListResponse",

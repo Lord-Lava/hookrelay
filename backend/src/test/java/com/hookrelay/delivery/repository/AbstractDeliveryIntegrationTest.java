@@ -53,7 +53,7 @@ public abstract class AbstractDeliveryIntegrationTest {
     jdbc = new JdbcTemplate(source);
     // Schema is generated locally, never derived from external input.
     jdbc.execute("CREATE SCHEMA " + schema);
-    migrate("11");
+    migrate("12");
     tx = new TransactionTemplate(new DataSourceTransactionManager(source));
     deliveries = new DeliveryStore(jdbc, tx, retryScheduler);
     UUID org = UUID.randomUUID();

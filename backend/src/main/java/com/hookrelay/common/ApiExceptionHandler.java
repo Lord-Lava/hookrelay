@@ -1,6 +1,9 @@
 package com.hookrelay.common;
 
 import com.hookrelay.auth.AuthenticationRequiredException;
+import com.hookrelay.delivery.application.DeliveryNotFoundException;
+import com.hookrelay.delivery.application.EndpointDisabledException;
+import com.hookrelay.delivery.application.InvalidDeliveryStateException;
 import com.hookrelay.endpoint.application.EndpointAlreadyExistsException;
 import com.hookrelay.endpoint.application.EndpointCapacityException;
 import com.hookrelay.endpoint.application.EndpointNotFoundException;
@@ -86,6 +89,25 @@ public class ApiExceptionHandler {
     return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
         .body(
             problem(HttpStatus.SERVICE_UNAVAILABLE, "Signing service is temporarily unavailable"));
+  }
+
+  @ExceptionHandler(DeliveryNotFoundException.class)
+  public ResponseEntity<ProblemDetail> handleDeliveryNotFound(DeliveryNotFoundException exception) {
+    return ResponseEntity.status(HttpStatus.NOT_FOUND)
+        .body(problem(HttpStatus.NOT_FOUND, exception.getMessage()));
+  }
+
+  @ExceptionHandler(InvalidDeliveryStateException.class)
+  public ResponseEntity<ProblemDetail> handleInvalidDeliveryState(
+      InvalidDeliveryStateException exception) {
+    return ResponseEntity.status(HttpStatus.CONFLICT)
+        .body(problem(HttpStatus.CONFLICT, exception.getMessage()));
+  }
+
+  @ExceptionHandler(EndpointDisabledException.class)
+  public ResponseEntity<ProblemDetail> handleEndpointDisabled(EndpointDisabledException exception) {
+    return ResponseEntity.badRequest()
+        .body(problem(HttpStatus.BAD_REQUEST, exception.getMessage()));
   }
 
   private ProblemDetail problem(HttpStatus status, String detail) {

@@ -14,6 +14,46 @@ info:
 servers:
   - url: http://localhost:8080
 paths:
+  /v1/deliveries/{deliveryId}/replay:
+    post:
+      summary: Manually replay a dead-lettered delivery
+      security:
+        - ProjectApiKey: []
+      parameters:
+        - in: path
+          name: deliveryId
+          required: true
+          schema: { type: string, format: uuid }
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[A-Za-z0-9._:-]+$'
+      responses:
+        '202':
+          description: Delivery replay accepted; a new delivery cycle was created with a fresh retry budget.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplayResponse'
+        '400':
+          description: Invalid request or endpoint is disabled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Unknown delivery or delivery owned by another project, or endpoint deleted
+        '409':
+          description: Delivery is not in DEAD_LETTERED state, or idempotency key conflict
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          description: Signing service is not configured
+
   /v1/events:
     post:
       summary: Accept an event for asynchronous processing
@@ -457,6 +497,14 @@ components:
         signingSecret: { type: string, example: 'whsec_live_...', description: 'New signing secret, disclosed once.' }
         enabled: { type: boolean }
         updatedAt: { type: string, format: date-time }
+    ReplayResponse:
+      type: object
+      required: [deliveryId, newCycleNumber, replayed, replayedAt]
+      properties:
+        deliveryId: { type: string, format: uuid }
+        newCycleNumber: { type: integer, minimum: 0 }
+        replayed: { type: boolean }
+        replayedAt: { type: string, format: date-time }
     UpdateEndpointRequest:
       description: Omitted or null fields preserve their existing values.
       type: object

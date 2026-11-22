@@ -368,6 +368,206 @@ public class DeliveryStore {
     });
   }
 
+  /**
+   * Replays a {@link DeliveryStatus#DEAD_LETTERED} delivery by creating a new delivery cycle with a
+   * fresh bounded retry budget and transitioning the delivery back to {@link
+   * DeliveryStatus#PENDING}. All previous cycles and attempts are preserved. The caller must have
+   * already verified endpoint eligibility and signing-secret availability.
+   *
+   * @return true if the replay was scheduled; false if the delivery is not in a replayable state or
+   *     the idempotency key is already used for this delivery
+   */
+  public boolean replay(
+      UUID projectId,
+      UUID id,
+      UUID actorApiKeyId,
+      String replayKey,
+      String replayFingerprint,
+      String reason) {
+    checkError(reason);
+    Instant now = now();
+
+    // Defer constraint checking to handle the circular FK between deliveries and delivery_cycles.
+    jdbc.execute("SET CONSTRAINTS ALL DEFERRED");
+
+    // Lock the delivery row (and its endpoint) following the same lock order as lock().
+    var initial = find(projectId, id);
+    if (initial.isEmpty()) return false;
+    UUID endpointId = initial.get().endpointId();
+    jdbc.update(
+        "INSERT INTO project_dispatch_controls(project_id) VALUES (?) ON CONFLICT DO NOTHING",
+        projectId);
+    jdbc.queryForObject(
+        "SELECT project_id FROM project_dispatch_controls WHERE project_id=? FOR UPDATE",
+        UUID.class,
+        projectId);
+    jdbc.update(
+        """
+        INSERT INTO endpoint_dispatch_controls(project_id,endpoint_id)
+        SELECT project_id,id FROM endpoints WHERE project_id=? AND id=? ON CONFLICT DO NOTHING
+        """,
+        projectId,
+        endpointId);
+    jdbc.queryForObject(
+        "SELECT endpoint_id FROM endpoint_dispatch_controls WHERE project_id=? AND endpoint_id=? FOR UPDATE",
+        UUID.class,
+        projectId,
+        endpointId);
+    boolean endpointActive =
+        Boolean.TRUE.equals(
+            jdbc.queryForObject(
+                """
+                SELECT enabled AND deleted_at IS NULL FROM endpoints WHERE project_id=? AND id=? FOR UPDATE
+                """,
+                Boolean.class,
+                projectId,
+                endpointId));
+    if (!endpointActive) return false;
+
+    var locked =
+        jdbc
+            .query(
+                "SELECT * FROM deliveries WHERE project_id=? AND id=? FOR UPDATE",
+                (rs, row) -> new LockedDelivery(delivery(rs), endpointActive),
+                projectId,
+                id)
+            .stream()
+            .findFirst();
+    if (locked.isEmpty()) return false;
+    Delivery d = locked.get().delivery();
+
+    // Idempotency: same replay_fingerprint already used for this delivery → already replayed.
+    // Check before status so that a replayed (PENDING) delivery is still recognized as replayed.
+    List<Integer> existingCycles =
+        jdbc.query(
+            """
+            SELECT cycle_number FROM delivery_cycles
+            WHERE project_id=? AND delivery_id=? AND replay_fingerprint=?
+            """,
+            (rs, row) -> rs.getInt("cycle_number"),
+            projectId,
+            id,
+            replayFingerprint);
+    if (!existingCycles.isEmpty()) return true;
+
+    if (d.status() != DeliveryStatus.DEAD_LETTERED) return false;
+
+    int nextCycle = d.cycleNumber() + 1;
+    Instant deadline = now.plus(Duration.ofHours(24));
+
+    // Insert the new replay cycle (defers the circular FK on deliveries.cycle_number).
+    jdbc.update(
+        """
+        INSERT INTO delivery_cycles(project_id,delivery_id,cycle_number,started_at,deadline,
+            policy_version,max_attempts,replay_key,replay_fingerprint,actor_api_key_id,reason)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        projectId,
+        id,
+        nextCycle,
+        Timestamp.from(now),
+        Timestamp.from(deadline),
+        d.policyVersion(),
+        d.maxAttempts(),
+        replayKey,
+        replayFingerprint,
+        actorApiKeyId,
+        reason);
+
+    // Transition delivery back to PENDING with the new cycle's budget.
+    jdbc.update(
+        """
+        UPDATE deliveries SET status='PENDING', cycle_number=?, cycle_attempt_count=0,
+          next_attempt_at=?, terminal_at=NULL, last_error_code=NULL,
+          lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL,
+          cycle_started_at=?, cycle_deadline=?, updated_at=clock_timestamp()
+        WHERE project_id=? AND id=? AND status='DEAD_LETTERED'
+        """,
+        nextCycle,
+        Timestamp.from(now),
+        Timestamp.from(now),
+        Timestamp.from(deadline),
+        projectId,
+        id);
+
+    return true;
+  }
+
+  /**
+   * Cancels all PENDING and RETRY_SCHEDULED deliveries for a soft-deleted endpoint, and marks any
+   * STARTED attempts as ABORTED. Follows the same lock ordering as {@link #lock(UUID, UUID)} to
+   * avoid deadlocks with concurrent claimers.
+   */
+  public int cancelQueuedDeliveriesForEndpoint(UUID projectId, UUID endpointId, String reasonCode) {
+    checkError(reasonCode);
+    Instant now = now();
+
+    // Same lock order as lock(): project control → endpoint control → endpoint row.
+    jdbc.update(
+        "INSERT INTO project_dispatch_controls(project_id) VALUES (?) ON CONFLICT DO NOTHING",
+        projectId);
+    jdbc.queryForObject(
+        "SELECT project_id FROM project_dispatch_controls WHERE project_id=? FOR UPDATE",
+        UUID.class,
+        projectId);
+    jdbc.update(
+        """
+        INSERT INTO endpoint_dispatch_controls(project_id,endpoint_id)
+        SELECT project_id,id FROM endpoints WHERE project_id=? AND id=? ON CONFLICT DO NOTHING
+        """,
+        projectId,
+        endpointId);
+    jdbc.queryForObject(
+        "SELECT endpoint_id FROM endpoint_dispatch_controls WHERE project_id=? AND endpoint_id=? FOR UPDATE",
+        UUID.class,
+        projectId,
+        endpointId);
+
+    // Mark in-flight attempts as aborted so workers know not to finalize them.
+    jdbc.update(
+        """
+        UPDATE delivery_attempts SET outcome='ABORTED', completed_at=?, error_code=?
+        WHERE project_id=? AND delivery_id IN (
+          SELECT id FROM deliveries WHERE project_id=? AND endpoint_id=?
+            AND status IN ('PENDING','RETRY_SCHEDULED','IN_PROGRESS')
+        ) AND outcome='STARTED'
+        """,
+        Timestamp.from(now),
+        reasonCode,
+        projectId,
+        projectId,
+        endpointId);
+
+    // Cancel queued (non-terminal) deliveries for this endpoint.
+    int cancelled =
+        jdbc.update(
+            """
+            UPDATE deliveries SET status='CANCELLED', next_attempt_at=NULL, terminal_at=?,
+              last_error_code=?,
+              lease_owner=NULL, lease_token=NULL, lease_expires_at=NULL, updated_at=clock_timestamp()
+            WHERE project_id=? AND endpoint_id=? AND status IN ('PENDING','RETRY_SCHEDULED')
+            """,
+            Timestamp.from(now),
+            reasonCode,
+            projectId,
+            endpointId);
+
+    // Terminalize the corresponding cycles.
+    jdbc.update(
+        """
+        UPDATE delivery_cycles c SET terminal_status='CANCELLED', terminal_at=?
+        FROM deliveries d
+        WHERE c.project_id=d.project_id AND c.delivery_id=d.id AND c.cycle_number=d.cycle_number
+          AND d.project_id=? AND d.endpoint_id=? AND d.status='CANCELLED'
+          AND c.terminal_status IS NULL
+        """,
+        Timestamp.from(now),
+        projectId,
+        endpointId);
+
+    return cancelled;
+  }
+
   /** Expires queued work without inventing a transport attempt, including disabled endpoints. */
   public boolean expireHorizon(UUID projectId, UUID id) {
     return transactions.execute(tx -> {

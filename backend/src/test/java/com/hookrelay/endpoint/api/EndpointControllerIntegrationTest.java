@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.hookrelay.auth.ApiKeyAuthService;
+import com.hookrelay.delivery.repository.DeliveryStore;
 import com.hookrelay.endpoint.application.EndpointAlreadyExistsException;
 import com.hookrelay.endpoint.application.EndpointNotFoundException;
 import com.hookrelay.endpoint.application.EndpointService;
@@ -66,6 +67,7 @@ class EndpointControllerIntegrationTest {
   @Autowired private JdbcTemplate jdbcTemplate;
   @Autowired private EndpointService endpointService;
   @Autowired private WebhookEndpointRepository endpointRepository;
+  @Autowired private DeliveryStore deliveryStore;
 
   private Validator validator;
 
@@ -473,7 +475,13 @@ class EndpointControllerIntegrationTest {
     unconfigured.afterPropertiesSet();
     var service =
         new EndpointService(
-            endpointRepository, unconfigured, jdbcTemplate, mapper, url -> {}, transactions);
+            endpointRepository,
+            unconfigured,
+            deliveryStore,
+            jdbcTemplate,
+            mapper,
+            url -> {},
+            transactions);
     assertThatThrownBy(() -> service.createEndpoint(projectId, "https://8.8.8.8/missing", null))
         .isInstanceOf(SigningUnavailableException.class);
     assertThat(endpointService.countEndpoints(projectId)).isZero();
@@ -492,6 +500,7 @@ class EndpointControllerIntegrationTest {
         new EndpointService(
             endpointRepository,
             secrets,
+            deliveryStore,
             jdbcTemplate,
             mapper,
             url -> {
