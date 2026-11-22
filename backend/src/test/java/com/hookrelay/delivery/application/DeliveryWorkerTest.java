@@ -192,6 +192,19 @@ class DeliveryWorkerTest {
   }
 
   @Test
+  void givenInterruptedDnsLookup_whenProcess_thenRetryScheduled() throws Exception {
+    stubAttempt(DeliveryStatus.RETRY_SCHEDULED, "https://customer.example/hook");
+    var failure = new UnknownHostException("DNS lookup interrupted");
+    failure.initCause(new InterruptedException());
+    var actualTransport = stubDnsFailure(failure);
+    try {
+      assertRetryableFailure("DNS_INTERRUPTED");
+    } finally {
+      actualTransport.destroy();
+    }
+  }
+
+  @Test
   void givenDnsLookupTimeout_whenProcess_thenRetryScheduled() throws Exception {
     stubAttempt(DeliveryStatus.RETRY_SCHEDULED, "https://customer.example/hook");
     var failure = new UnknownHostException("DNS lookup timed out");

@@ -77,6 +77,9 @@ public class TransportException extends Exception {
         return new TransportException(message, failure, true, "TLS_FAILURE");
       }
       if (cause instanceof UnknownHostException) {
+        if (hasCause(cause, InterruptedException.class)) {
+          return new TransportException(message, failure, false, "DNS_INTERRUPTED");
+        }
         if (hasCause(cause, TimeoutException.class)) {
           return new TransportException(message, failure, false, "DNS_TIMEOUT");
         }

@@ -537,6 +537,10 @@ Automatically recover from temporary endpoint failures and preserve permanently 
 
 ### Selected default policy
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:223eee48bd4eb5c6a837dc4e828f5b9959089be3fecdb0f175b9a9ed35bc2b0c -->
+
 | Result                             | Behaviour                                    |
 |------------------------------------|----------------------------------------------|
 | HTTP 2xx                           | Success (`DELIVERED`)                        |
@@ -546,6 +550,7 @@ Automatically recover from temporary endpoint failures and preserve permanently 
 | Connection timeout/network failure | Retry                                        |
 | SSRF policy violation              | Permanent failure (`SSRF_REJECTED`)          |
 | DNS lookup timeout                 | Retry (`DNS_TIMEOUT`)                        |
+| DNS lookup interrupted             | Retry (`DNS_INTERRUPTED`)                    |
 | DNS executor capacity unavailable  | Retry (`DNS_CAPACITY_UNAVAILABLE`)            |
 | DNS failure without a retry cause  | Permanent failure (`DNS_FAILURE`)           |
 | Peer EOF during TLS handshake      | Retry (`TRANSPORT_FAILURE`)                  |
@@ -555,15 +560,23 @@ Automatically recover from temporary endpoint failures and preserve permanently 
 | Max attempts exhausted             | Dead-letter (`DEAD_LETTERED`)                |
 | Retry horizon exceeded             | Dead-letter (`DEAD_LETTERED`)                |
 
+<!-- /coderabbit-ai-generated:v1 -->
+
 Use the selected 8-attempt/24-hour cycle budget, equal jitter with a 10-second base and one-hour cap, bounded Retry-After, and the full outcome classification in the reference. Persist each cycle's policy version/limits; configuration must not silently expand existing budgets.
 
 ### Implementation notes
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:99458b16dd5d71c5a42f7d3e8d4cabb64823875727b3ce5bfe3b89a874eb2feb -->
+
 - `RetryScheduler` computes exponential backoff with equal jitter (`[cap/2, cap]`), clamps Retry-After to `maxSeconds`, combines via `max(jittered, retryAfter)`, and is overflow-safe for large attempt numbers. The jitter source is injectable for deterministic tests.
-- `DeliveryWorker` retries DNS lookup timeouts, DNS executor rejections, and peer EOF during TLS handshakes. DNS failures without a recognized retryable cause, SSRF rejections, and TLS verification failures are permanent. The worker measures failed sends with a monotonic clock and clamps Retry-After hints before converting them to `int`.
+- `DeliveryWorker` retries DNS lookup timeouts, DNS executor rejections, interrupted DNS lookups, and peer EOF during TLS handshakes. DNS failures without a recognized retryable cause, SSRF rejections, and TLS verification failures are permanent. The worker measures failed sends with a monotonic clock and clamps Retry-After hints before converting them to `int`.
 - `DeliveryStore` persists `next_attempt_at`, `last_error_code`, `terminal_at`, and attempt history atomically. Dead-lettered deliveries (`DEAD_LETTERED`) are excluded from `listDue` and `claim`, never automatically retried, and are idempotent under concurrent terminalization.
 - Crash/restart recovery uses `recoverExpired` (fenced lease expiry) and `expireHorizon` (cycle deadline exceeded → `DEAD_LETTERED`).
 - Customer-visible DLQ = PostgreSQL rows in `DEAD_LETTERED` plus attempt/cycle history, independent of RabbitMQ's broker-level DLQ.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 ### Coding-agent prompt
 
@@ -1344,6 +1357,10 @@ slow-upload and TLS tests, including after headers. Once final 2xx headers arriv
 the outcome is success; an optional diagnostic body's failure must not turn that
 known success into a retry. Responses are not application payload acknowledgements.
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:8ba5d8d6eeefe6a2cc296451beedd017eb86687657b720790871e1e913f55593 -->
+
 | Result                                                                                         | Decision                                                                                    |
 |------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
 | Final 2xx                                                                                      | `DELIVERED`, including 202/204.                                                             |
@@ -1351,18 +1368,28 @@ known success into a retry. Responses are not application payload acknowledgemen
 | Connection refused/reset, peer EOF during TLS handshake, connect/read/total timeout                    | Retry; outcome may be ambiguous.                                                            |
 | Other 4xx; all 3xx                                                                             | Permanent failure; never follow Location.                                                   |
 | DNS lookup timeout or DNS executor rejection | Retry within the attempt budget (`DNS_TIMEOUT` or `DNS_CAPACITY_UNAVAILABLE`). |
+| DNS lookup interrupted | Retry within the attempt budget (`DNS_INTERRUPTED`). |
 | DNS failure without a recognized retryable cause, TLS trust/hostname failure, prohibited address/scheme/port, invalid endpoint secret ciphertext | Permanent security/configuration failure; no unsafe fallback.                               |
 | Response protocol/header limit failure before a final status                                   | Permanent `INVALID_RESPONSE`; no unbounded parsing.                                         |
 | Missing active/decryption key or exhausted local worker resources                          | Pre-send infrastructure deferral, alert; no attempt consumed, cycle horizon still enforced. |
 | Invalid/unknown outcome                                                                        | Fail closed with explicit classified reason; no default success.                            |
 
+<!-- /coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:060b7f8cb8b4d9ccaa248b8696082a61031cc3301ca8937417d5cb4cef20467b -->
+
 `SystemDnsResolver` preserves a lookup deadline's `TimeoutException` and an
 executor rejection's `RejectedExecutionException` in the `UnknownHostException`
-cause chain. The transport retries those identified failures. A plain platform
+cause chain, along with `InterruptedException` when the waiting caller is interrupted.
+The transport classifies those failures as retryable. A plain platform
 lookup failure does not reliably distinguish a transient DNS error from an
 unknown host; without a recognized retryable cause it is terminal (`DNS_FAILURE`).
 The worker starts the attempt before the transport resolves DNS, so these
 retryable DNS failures consume an attempt.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 After failed attempt number `n` within its cycle, compute
 `cap=min(3600s,10s*2^(n-1))` and equal-jitter delay uniformly from `[cap/2,cap]`.

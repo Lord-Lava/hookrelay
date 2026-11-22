@@ -44,8 +44,12 @@ state.
 
 ## 3. Retry classification
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:cc05c90b86ec34a26c8f8474ef5eda66a7d5f545be201ab25621a3f792a1803c -->
+
 The transport classifies HTTP responses and transport failures. For DNS failures, a
-timeout or executor rejection in the cause chain signals a retryable failure. The
+timeout, executor rejection, or interruption in the cause chain signals a retryable failure. The
 worker uses that classification to apply the following policy:
 
 | Result                             | Behaviour                                    |
@@ -57,6 +61,7 @@ worker uses that classification to apply the following policy:
 | Connection timeout / network IO    | Retry                                        |
 | SSRF policy violation              | Permanent (`SSRF_REJECTED`) — not retried    |
 | DNS lookup timeout                 | Retry (`DNS_TIMEOUT`)                        |
+| DNS lookup interrupted             | Retry (`DNS_INTERRUPTED`)                    |
 | DNS executor capacity unavailable  | Retry (`DNS_CAPACITY_UNAVAILABLE`)            |
 | DNS failure without a retry cause  | Permanent (`DNS_FAILURE`)                   |
 | Peer EOF during TLS handshake      | Retry (`TRANSPORT_FAILURE`)                  |
@@ -66,9 +71,11 @@ worker uses that classification to apply the following policy:
 | Max attempts exhausted             | Dead-letter (`DEAD_LETTERED`)                |
 | Retry horizon exceeded             | Dead-letter (`DEAD_LETTERED`)                |
 
-Temporary DNS failures reported as lookup timeouts are retryable. Unknown hosts, SSRF
-rejections, and TLS trust or hostname verification failures are permanent. Only a final 2xx
+DNS failures without a recognized retryable cause, SSRF rejections, and TLS trust or
+hostname verification failures are permanent. Only a final 2xx
 response (including 202/204) marks a delivery delivered.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 ## 4. Exponential backoff and retry scheduling
 
