@@ -1,5 +1,6 @@
 package com.hookrelay.endpoint.application;
 
+import com.hookrelay.delivery.repository.DeliveryStore;
 import com.hookrelay.endpoint.domain.WebhookEndpoint;
 import com.hookrelay.endpoint.repository.WebhookEndpointRepository;
 import com.hookrelay.security.SigningSecretService;
@@ -19,6 +20,7 @@ public class EndpointService {
 
   private final WebhookEndpointRepository endpointRepository;
   private final SigningSecretService signingSecretService;
+  private final DeliveryStore deliveryStore;
   private final JdbcTemplate jdbcTemplate;
   private final ObjectMapper objectMapper;
   private final SsrfUrlValidator ssrfUrlValidator;
@@ -27,12 +29,14 @@ public class EndpointService {
   public EndpointService(
       WebhookEndpointRepository endpointRepository,
       SigningSecretService signingSecretService,
+      DeliveryStore deliveryStore,
       JdbcTemplate jdbcTemplate,
       ObjectMapper objectMapper,
       SsrfUrlValidator ssrfUrlValidator,
       TransactionTemplate transactions) {
     this.endpointRepository = endpointRepository;
     this.signingSecretService = signingSecretService;
+    this.deliveryStore = deliveryStore;
     this.jdbcTemplate = jdbcTemplate;
     this.objectMapper = objectMapper;
     this.ssrfUrlValidator = ssrfUrlValidator;
@@ -195,10 +199,43 @@ public class EndpointService {
 
   @Transactional
   public void deleteEndpoint(UUID id, UUID projectId) {
+    // Check endpoint existence first so that a missing endpoint throws EndpointNotFoundException
+    // rather than EmptyResultDataAccessException from dispatch control lock queries.
+    WebhookEndpoint existing =
+        endpointRepository
+            .findForUpdateAndProject(id, projectId)
+            .orElseThrow(() -> new EndpointNotFoundException("Endpoint not found: " + id));
+
+    // Follow the same lock order as DeliveryStore.lock() to avoid deadlocks with concurrent
+    // claimers: project control → endpoint control → endpoint row.
+    jdbcTemplate.update(
+        "INSERT INTO project_dispatch_controls(project_id) VALUES (?) ON CONFLICT DO NOTHING",
+        projectId);
+    jdbcTemplate.queryForObject(
+        "SELECT project_id FROM project_dispatch_controls WHERE project_id=? FOR UPDATE",
+        UUID.class,
+        projectId);
+    jdbcTemplate.update(
+        """
+        INSERT INTO endpoint_dispatch_controls(project_id,endpoint_id)
+        SELECT project_id,id FROM endpoints WHERE project_id=? AND id=? ON CONFLICT DO NOTHING
+        """,
+        projectId,
+        id);
+    jdbcTemplate.queryForObject(
+        "SELECT endpoint_id FROM endpoint_dispatch_controls WHERE project_id=? AND endpoint_id=? FOR UPDATE",
+        UUID.class,
+        projectId,
+        id);
+
     int deleted = endpointRepository.softDelete(id, projectId);
     if (deleted == 0) {
       throw new EndpointNotFoundException("Endpoint not found: " + id);
     }
+
+    // Cancel all PENDING/RETRY_SCHEDULED deliveries for this endpoint. IN_PROGRESS deliveries
+    // complete normally and are not cancelled (an already-transmitted webhook cannot be retracted).
+    deliveryStore.cancelQueuedDeliveriesForEndpoint(projectId, id, "ENDPOINT_DELETED");
   }
 
   /**

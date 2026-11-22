@@ -544,7 +544,7 @@ class DeliveryStoreIntegrationTest extends AbstractDeliveryIntegrationTest {
               old.queryForObject(
                   "SELECT max(version::int) FROM flyway_schema_history WHERE success",
                   Integer.class))
-          .isEqualTo(existingHistory ? 7 : 11);
+          .isEqualTo(existingHistory ? 7 : 12);
     } finally {
       jdbc.execute("DROP SCHEMA " + legacy + " CASCADE");
     }

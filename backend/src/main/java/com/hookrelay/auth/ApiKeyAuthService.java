@@ -55,7 +55,8 @@ public class ApiKeyAuthService {
                       rs.getString("key_hash").trim(),
                       new ProjectIdentity(
                           rs.getObject("organization_id", UUID.class),
-                          rs.getObject("project_id", UUID.class))));
+                          rs.getObject("project_id", UUID.class),
+                          rs.getObject("id", UUID.class))));
             },
             prefix);
 
