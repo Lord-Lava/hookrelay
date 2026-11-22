@@ -118,10 +118,9 @@ public class DeliveryWorker {
       if (delaySeconds < 0) {
         delaySeconds = 0;
       }
-      retryAt =
-          retryScheduler.nextAttemptAt(delivery.cycleAttemptCount(), (int) delaySeconds, now2);
+      retryAt = retryScheduler.nextAttemptAt(attempt.attemptNumber(), (int) delaySeconds, now2);
     } else if (result.outcome() == AttemptOutcome.RETRYABLE_FAILURE) {
-      retryAt = retryScheduler.nextAttemptAt(delivery.cycleAttemptCount(), null, now2);
+      retryAt = retryScheduler.nextAttemptAt(attempt.attemptNumber(), null, now2);
     }
     final TransportResult finalResult = result;
     final Instant finalRetryAt = retryAt;
@@ -135,7 +134,7 @@ public class DeliveryWorker {
               attempt.id(),
               finalResult.outcome(),
               finalResult.statusCode() == 0 ? null : finalResult.statusCode(),
-              finalResult.durationMs(),
+              finalResult.durationMs() == null ? 0L : finalResult.durationMs(),
               finalResult.errorCode(),
               finalRetryAt);
       return finalized ? deliveryStore.find(projectId, deliveryId).orElse(null).status() : null;

@@ -13,6 +13,7 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
@@ -299,7 +300,9 @@ public class SsrfSafeWebhookTransport implements WebhookTransport, DisposableBea
           }
         }
 
-        return new TransportResult(statusCode, responseBody, sentAt, outcome, null, null, retryAt);
+        long durationMs = Duration.between(sentAt, Instant.now()).toMillis();
+        return new TransportResult(
+            statusCode, responseBody, sentAt, outcome, durationMs, null, retryAt);
       }
     } catch (SsrfValidationException e) {
       // Permanent policy failure - URL validation or DNS address policy rejected.

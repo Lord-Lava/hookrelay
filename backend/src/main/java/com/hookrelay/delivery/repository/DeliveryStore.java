@@ -111,6 +111,26 @@ public class DeliveryStore {
         limit);
   }
 
+  /**
+   * Lists expired deliveries whose cycle deadline has passed but are still pending or
+   * retry-scheduled. Callers should expire them via {@link #expireHorizon(UUID, UUID)}.
+   */
+  public List<Delivery> listExpiredDeliveries(Instant now, int limit) {
+    if (limit < 1 || limit > 1000) throw new IllegalArgumentException("Invalid limit");
+    return jdbc.query(
+        """
+        SELECT * FROM deliveries
+        WHERE status IN ('PENDING', 'RETRY_SCHEDULED')
+          AND cycle_deadline IS NOT NULL
+          AND cycle_deadline <= ?
+        ORDER BY cycle_deadline ASC, created_at ASC, id ASC
+        LIMIT ?
+        """,
+        (rs, row) -> delivery(rs),
+        Timestamp.from(now),
+        limit);
+  }
+
   public List<DeliveryAttempt> attempts(UUID projectId, UUID id, int limit, long offset) {
     checkPage(limit, offset);
     return jdbc.query(
