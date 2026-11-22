@@ -118,9 +118,9 @@ public class DeliveryDispatcher {
     if (!properties.enabled()) {
       return;
     }
-
     Instant now = Instant.now();
-    List<Delivery> expired = deliveryStore.listExpiredLeases(now, properties.maxConcurrentClaims());
+    List<Delivery> expired =
+        deliveryStore.listExpiredDeliveries(now, properties.maxConcurrentClaims());
 
     for (Delivery delivery : expired) {
       if (delivery.status() != DeliveryStatus.PENDING

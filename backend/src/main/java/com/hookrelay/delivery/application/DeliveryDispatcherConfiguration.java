@@ -9,9 +9,11 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Configuration for the delivery dispatcher and worker.
@@ -25,6 +27,12 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @EnableScheduling
 @ConditionalOnProperty(name = "hookrelay.delivery.dispatcher.enabled", havingValue = "true")
 public class DeliveryDispatcherConfiguration {
+
+  @Bean
+  public DeliveryStore deliveryStore(
+      JdbcTemplate jdbc, TransactionTemplate transactions, RetryScheduler retryScheduler) {
+    return new DeliveryStore(jdbc, transactions, retryScheduler);
+  }
 
   @Bean
   public DeliveryDispatcher deliveryDispatcher(
@@ -57,11 +65,5 @@ public class DeliveryDispatcherConfiguration {
   @Bean
   public DispatchControlService dispatchControlService() {
     return new DispatchControlService();
-  }
-
-  @Bean
-  public RetryScheduler retryScheduler(DeliveryDispatcherProperties properties) {
-    return new RetryScheduler(
-        properties.retryBaseSeconds(), properties.retryMaxSeconds(), properties.cycleDeadline());
   }
 }
