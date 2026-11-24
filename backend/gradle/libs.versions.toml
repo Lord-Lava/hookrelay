@@ -1,6 +1,6 @@
 [versions]
 spring-boot = "4.1.2"
-spotless = "8.11.0"
+spotless = "8.12.0"
 google-java-format = "2.0.0"
 owasp-dependency-check = "13.0.0"
 cyclonedx = "3.6.1"
