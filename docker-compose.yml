@@ -20,7 +20,7 @@ services:
     networks: [hookrelay]
 
   rabbitmq:
-    image: rabbitmq:4.4.0-management
+    image: rabbitmq:4.4.1-management
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-hookrelay}
